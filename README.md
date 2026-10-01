@@ -91,7 +91,7 @@ Google enforces project-level API quotas, OAuth consent/testing policies, channe
 
 ### Narration
 
-- Default `MOTIVATIONOS_TTS_PROVIDER=elevenlabs` requires `ELEVENLABS_API_KEY` and an account-authorized `ELEVENLABS_VOICE_ID`. `ELEVENLABS_MODEL_ID` defaults to `eleven_multilingual_v2`, which supports multilingual Hindi input. Provider usage is billed and quota-limited according to the current account plan.
+- The existing production TTS path requires an explicit `MOTIVATIONOS_TTS_PROVIDER` selection; it is unset by default. Selecting `elevenlabs` requires `ELEVENLABS_API_KEY` and an account-authorized `ELEVENLABS_VOICE_ID`. `ELEVENLABS_MODEL_ID` defaults to `eleven_multilingual_v2`. Provider usage is billed and quota-limited according to the current account plan.
 - `MOTIVATIONOS_TTS_PROVIDER=edge-tts` explicitly selects the Edge TTS network service with `EDGE_TTS_VOICE` (default `hi-IN-SwaraNeural`). It has no API-key setting, but depends on network/service availability and applicable service terms. No synthetic/fake audio fallback exists.
 - Audio is probed by FFprobe before it is accepted.
 
@@ -102,6 +102,8 @@ Run its offline tests with:
 ```bash
 .venv/bin/pytest -q tests/test_audio_generation.py
 ```
+
+Day 10 adds an opt-in Edge TTS adapter to the same interface. `MOTIVATIONOS_AUDIO_PROVIDER` is unset by default; select `mock` for a local tone fixture or `edge-tts` to explicitly allow the Edge network service. `MOTIVATIONOS_AUDIO_TIMEOUT_SECONDS` sets the request timeout, and the existing `EDGE_TTS_VOICE` selects the voice. The new module rejects ElevenLabs selection and never reads its credentials. Real generation remains a direct, explicit call to `generate_audio_for_approved_script`; it does not enter the video production, publishing, or scheduling workflows. Tests replace the Edge client and do not contact the service.
 
 ### Licensed visuals
 

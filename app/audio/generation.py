@@ -85,7 +85,7 @@ class MockAudioProvider:
 
 
 def build_audio_provider(provider_name: str | None = None) -> AudioProvider:
-    """Return only an explicitly selected provider; never select a real TTS service."""
+    """Return only an explicitly selected provider; never select a paid provider."""
     selected = (
         provider_name
         if provider_name is not None
@@ -93,6 +93,12 @@ def build_audio_provider(provider_name: str | None = None) -> AudioProvider:
     ).strip().lower()
     if selected == "mock":
         return MockAudioProvider()
+    if selected == "edge-tts":
+        voice = os.getenv("EDGE_TTS_VOICE", "hi-IN-SwaraNeural").strip()
+        if not voice:
+            raise AudioGenerationError("EDGE_TTS_VOICE must name an available voice.")
+        timeout_seconds = _audio_timeout_seconds()
+        return EdgeTTSAudioAdapter(voice, timeout_seconds)
     if not selected:
         raise AudioProviderUnavailableError(
             "No audio provider selected. Explicitly choose 'mock' or provide an implemented provider."
@@ -100,6 +106,66 @@ def build_audio_provider(provider_name: str | None = None) -> AudioProvider:
     raise AudioProviderUnavailableError(
         "The requested audio provider is unavailable in the safe audio module."
     )
+
+
+def _audio_timeout_seconds() -> int:
+    raw_timeout = os.getenv("MOTIVATIONOS_AUDIO_TIMEOUT_SECONDS", "120").strip()
+    try:
+        timeout_seconds = int(raw_timeout)
+    except ValueError as error:
+        raise AudioGenerationError(
+            "MOTIVATIONOS_AUDIO_TIMEOUT_SECONDS must be an integer from 1 to 300."
+        ) from error
+    if not 1 <= timeout_seconds <= 300:
+        raise AudioGenerationError(
+            "MOTIVATIONOS_AUDIO_TIMEOUT_SECONDS must be an integer from 1 to 300."
+        )
+    return timeout_seconds
+
+
+class EdgeTTSAudioAdapter:
+    """Adapt the existing Edge TTS implementation to the approved-text protocol."""
+
+    provider_name = "Microsoft Edge TTS"
+
+    def __init__(self, voice: str, timeout_seconds: int) -> None:
+        from app.video.tts_engine import EdgeTTSProvider
+
+        self._provider = EdgeTTSProvider(voice=voice, timeout_seconds=timeout_seconds)
+
+    def generate(self, approved_script_text: str, output_path: str | Path) -> Path:
+        if not isinstance(approved_script_text, str) or not approved_script_text.strip():
+            raise AudioGenerationError("Approved script text must not be empty.")
+        destination = Path(output_path)
+        if destination.suffix.lower() != ".mp3":
+            raise AudioGenerationError("Edge TTS output must use the .mp3 extension.")
+        if destination.exists():
+            raise AudioGenerationError("Audio output already exists; refusing to overwrite it.")
+        try:
+            generated_path = Path(
+                self._provider.generate(approved_script_text, destination)
+            )
+            if generated_path.resolve() != destination.resolve():
+                raise AudioGenerationError("Audio provider returned an unexpected output path.")
+            validate_audio_file(generated_path, provider=self.provider_name)
+            return generated_path
+        except AudioGenerationError:
+            _remove_partial_output(destination)
+            raise
+        except Exception as error:
+            _remove_partial_output(destination)
+            if "timed out" in str(error).lower():
+                raise AudioGenerationError("Edge TTS request timed out.") from None
+            raise AudioGenerationError(
+                "Edge TTS request failed; check network, service, and voice configuration."
+            ) from None
+
+
+def _remove_partial_output(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def validate_audio_file(
@@ -273,5 +339,5 @@ def generate_audio_for_approved_script(
         raise
     except Exception as error:
         if destination.is_file():
-            destination.unlink()
-        raise AudioGenerationError("Audio provider failed to generate a valid file.") from error
+            _remove_partial_output(destination)
+        raise AudioGenerationError("Audio provider failed to generate a valid file.") from None

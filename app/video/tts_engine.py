@@ -36,15 +36,31 @@ class EdgeTTSProvider:
         self.timeout_seconds = timeout_seconds
 
     def synthesize(self, script: MotivationalScript, output_path: str | Path) -> AudioMetadata:
-        if not script.narration.strip():
+        output = self._generate_text(script.narration, output_path, refuse_existing=False)
+        return validate_audio(output, self.provider_name, self.voice)
+
+    def generate(self, approved_script_text: str, output_path: str | Path) -> Path:
+        """Generate audio from approved narration text for the audio-provider protocol."""
+        return self._generate_text(approved_script_text, output_path, refuse_existing=True)
+
+    def _generate_text(
+        self,
+        text: str,
+        output_path: str | Path,
+        *,
+        refuse_existing: bool,
+    ) -> Path:
+        if not isinstance(text, str) or not text.strip():
             raise TTSError("Approved script narration is empty.")
         try:
             import edge_tts
 
             output = Path(output_path)
+            if refuse_existing and output.exists():
+                raise TTSError("Audio output already exists; refusing to overwrite it.")
             output.parent.mkdir(parents=True, exist_ok=True)
             communicator = edge_tts.Communicate(
-                script.narration,
+                text,
                 self.voice,
                 connect_timeout=10,
                 receive_timeout=min(self.timeout_seconds, 120),
@@ -64,7 +80,7 @@ class EdgeTTSProvider:
             else:
                 help_text = "Check network access, service availability, and the configured voice name."
             raise TTSError(f"{help_text} Provider error: {message}") from error
-        return validate_audio(output, self.provider_name, self.voice)
+        return output
 
 
 class ElevenLabsTTSProvider:
@@ -158,17 +174,17 @@ class ElevenLabsTTSProvider:
 
 
 def build_tts_provider() -> ElevenLabsTTSProvider | EdgeTTSProvider:
-    """Build only a configured real speech service; never return synthetic audio."""
-    provider = os.getenv("MOTIVATIONOS_TTS_PROVIDER", "elevenlabs").strip().lower()
+    """Build only an explicitly selected real speech service."""
+    provider = os.getenv("MOTIVATIONOS_TTS_PROVIDER", "").strip().lower()
+    if not provider:
+        raise TTSError("MOTIVATIONOS_TTS_PROVIDER must explicitly select a TTS provider.")
     if provider == "elevenlabs":
         api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
         voice_id = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
         model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2").strip()
         return ElevenLabsTTSProvider(api_key, voice_id, model_id)
     if provider != "edge-tts":
-        raise TTSError(
-            f"Unsupported MOTIVATIONOS_TTS_PROVIDER={provider!r}; supported providers: elevenlabs, edge-tts."
-        )
+        raise TTSError("Unsupported MOTIVATIONOS_TTS_PROVIDER; supported providers: elevenlabs, edge-tts.")
     voice = os.getenv("EDGE_TTS_VOICE", "hi-IN-SwaraNeural").strip()
     if not voice:
         raise TTSError("EDGE_TTS_VOICE must name an available Hindi/Hinglish-capable voice.")
