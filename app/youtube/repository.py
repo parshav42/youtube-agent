@@ -42,10 +42,35 @@ def initialize_youtube_database(database_path: str | Path | None = None) -> None
                 )),
                 visibility TEXT NOT NULL CHECK (visibility IN ('private', 'unlisted', 'public')),
                 approved_at TEXT,
+                approved_channel_id TEXT,
+                authenticated_channel_id_at_approval TEXT,
                 metadata_json TEXT NOT NULL,
                 error TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            )"""
+        )
+        approval_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(publishing_approvals)")
+        }
+        if "approved_channel_id" not in approval_columns:
+            connection.execute(
+                "ALTER TABLE publishing_approvals ADD COLUMN approved_channel_id TEXT"
+            )
+        if "authenticated_channel_id_at_approval" not in approval_columns:
+            connection.execute(
+                "ALTER TABLE publishing_approvals ADD COLUMN authenticated_channel_id_at_approval TEXT"
+            )
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS youtube_channel_identity_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                production_id TEXT NOT NULL,
+                phase TEXT NOT NULL CHECK (phase IN ('approval', 'upload')),
+                outcome TEXT NOT NULL CHECK (outcome IN ('verified', 'rejected')),
+                reason TEXT NOT NULL,
+                approved_channel_id TEXT,
+                authenticated_channel_id TEXT,
+                created_at TEXT NOT NULL
             )"""
         )
         connection.execute(
@@ -204,6 +229,9 @@ def approve_production(
     visibility: str,
     metadata: dict[str, Any],
     database_path: str | Path | None = None,
+    *,
+    approved_channel_id: str | None = None,
+    authenticated_channel_id_at_approval: str | None = None,
 ) -> dict[str, Any]:
     if visibility not in {"private", "unlisted", "public"}:
         raise ValueError("Visibility must be private, unlisted, or public.")
@@ -225,12 +253,24 @@ def approve_production(
             raise ValueError(f"Production cannot be approved from state {existing['state']!r}.")
         connection.execute(
             """INSERT INTO publishing_approvals
-            (production_id, state, visibility, approved_at, metadata_json, error, created_at, updated_at)
-            VALUES (?, 'approved', ?, ?, ?, NULL, ?, ?)
+            (production_id, state, visibility, approved_at, approved_channel_id,
+                authenticated_channel_id_at_approval, metadata_json, error, created_at, updated_at)
+            VALUES (?, 'approved', ?, ?, ?, ?, ?, NULL, ?, ?)
             ON CONFLICT(production_id) DO UPDATE SET state = 'approved', visibility = excluded.visibility,
                 approved_at = excluded.approved_at, metadata_json = excluded.metadata_json,
+                approved_channel_id = excluded.approved_channel_id,
+                authenticated_channel_id_at_approval = excluded.authenticated_channel_id_at_approval,
                 error = NULL, updated_at = excluded.updated_at""",
-            (production_id, visibility, now, metadata_json, now, now),
+            (
+                production_id,
+                visibility,
+                now,
+                approved_channel_id,
+                authenticated_channel_id_at_approval,
+                metadata_json,
+                now,
+                now,
+            ),
         )
         connection.execute(
             """INSERT INTO youtube_uploads
@@ -244,6 +284,53 @@ def approve_production(
     if approval is None:
         raise RuntimeError("Publishing approval could not be read after saving.")
     return approval
+
+
+def record_channel_identity_audit(
+    production_id: str,
+    *,
+    phase: str,
+    outcome: str,
+    reason: str,
+    approved_channel_id: str | None = None,
+    authenticated_channel_id: str | None = None,
+    database_path: str | Path | None = None,
+) -> None:
+    """Record channel verification using IDs and fixed, non-sensitive reason codes only."""
+    if phase not in {"approval", "upload"} or outcome not in {"verified", "rejected"}:
+        raise ValueError("Invalid channel identity audit event.")
+    initialize_youtube_database(database_path)
+    with _connection(database_path) as connection:
+        connection.execute(
+            """INSERT INTO youtube_channel_identity_audit
+            (production_id, phase, outcome, reason, approved_channel_id,
+                authenticated_channel_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                production_id,
+                phase,
+                outcome,
+                reason,
+                approved_channel_id,
+                authenticated_channel_id,
+                _now(),
+            ),
+        )
+
+
+def get_channel_identity_audit(
+    production_id: str,
+    database_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    initialize_youtube_database(database_path)
+    with _connection(database_path) as connection:
+        rows = connection.execute(
+            """SELECT phase, outcome, reason, approved_channel_id,
+                authenticated_channel_id, created_at
+            FROM youtube_channel_identity_audit WHERE production_id = ? ORDER BY id""",
+            (production_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def get_upload(
