@@ -10,7 +10,7 @@ from app.config import get_database_path, get_youtube_visibility
 from app.database.db import get_production_by_id
 from app.schemas.script_schema import ProductionMetadata
 from app.video.video_assembler import validate_video
-from app.video.review_gates import has_recorded_decision, production_qa_allows_approval
+from app.video.review_gates import has_recorded_decision, production_qa_allows_approval, video_sha256
 from app.youtube.auth import GoogleOAuthService
 from app.youtube.repository import (
     approve_production,
@@ -160,6 +160,7 @@ class YouTubePublisher:
             raise
 
         request: Any | None = None
+        upload_started = False
         try:
             service = self.api_builder(credentials)
             description = self._description_with_reference(metadata.description, production_id)
@@ -185,6 +186,9 @@ class YouTubePublisher:
                 )
             response = None
             while response is None:
+                if not upload_started:
+                    self._load_completed_production(production_id)
+                    upload_started = True
                 status, response = request.next_chunk(num_retries=0)
                 resumable_uri = getattr(request, "resumable_uri", None)
                 if resumable_uri:
@@ -211,6 +215,8 @@ class YouTubePublisher:
             )
         except Exception as error:
             resumable_uri = getattr(request, "resumable_uri", None) if request is not None else None
+            if isinstance(error, YouTubePublishError) and not upload_started:
+                raise
             http_status = getattr(getattr(error, "resp", None), "status", None)
             if http_status == 401:
                 self.oauth.mark_reauthorization_required()
@@ -375,6 +381,16 @@ class YouTubePublisher:
             )
         if not production_qa_allows_approval(metadata):
             raise YouTubePublishError("Production QA requirements have not been satisfied.")
+        decision = metadata["review_decision"]
+        try:
+            approved_video = self._video_path(production)
+            current_digest = video_sha256(approved_video)
+        except (OSError, YouTubePublishError) as error:
+            raise YouTubePublishError("The final reviewed video is unavailable.") from error
+        if decision.get("video_sha256") != current_digest:
+            raise YouTubePublishError(
+                "The final video differs from the artifact recorded at production review."
+            )
         return production
 
     def _load_metadata(self, production: dict[str, Any]) -> PublishingMetadata:
@@ -421,7 +437,13 @@ class YouTubePublisher:
             raise YouTubePublishError("Production has no validated MP4 path in its record.")
         root = Path(production["output_dir"]).resolve()
         path = Path(raw_path).resolve()
-        if root not in path.parents or path.suffix.lower() != ".mp4" or not path.is_file():
+        expected_path = (root / "final.mp4").resolve()
+        if (
+            root not in path.parents
+            or path != expected_path
+            or path.suffix.lower() != ".mp4"
+            or not path.is_file()
+        ):
             raise YouTubePublishError("Production MP4 is missing or outside its production directory.")
         return path
 

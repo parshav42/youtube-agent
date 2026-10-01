@@ -151,6 +151,7 @@ def test_needs_review_audio_requires_separate_recorded_human_decision(tmp_path):
     database = tmp_path / "audio-human-review.sqlite3"
     output = tmp_path / "production"
     output.mkdir()
+    (output / "final.mp4").write_bytes(b"reviewed video fixture")
     metadata = {
         "audio_qa": {"technical_status": "needs_review", "findings": ["Approximate analysis."]},
         "video_qa": {"technical_status": "passed", "findings": []},

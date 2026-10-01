@@ -3,6 +3,7 @@
 import json
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -44,6 +45,7 @@ def make_completed_production(database_path: Path, output_root: Path) -> tuple[s
         "reviewer": "test-production-reviewer",
         "confirmed": True,
         "reviewed_at": datetime.now(timezone.utc).isoformat(),
+        "video_sha256": hashlib.sha256(video_path.read_bytes()).hexdigest(),
     }
     production_metadata = {
         "video": {"path": str(video_path)},
@@ -363,6 +365,70 @@ def test_publisher_rejects_missing_approval_before_any_api_call(tmp_path) -> Non
         publisher.upload(production_id)
     assert api_calls == []
     assert get_upload(production_id, database_path) is None
+
+
+def test_publisher_rejects_video_changed_after_final_review(tmp_path) -> None:
+    database_path = tmp_path / "app.sqlite3"
+    production_id, video_path = make_completed_production(database_path, tmp_path / "production")
+    api_calls = []
+    publisher = YouTubePublisher(
+        database_path,
+        oauth=SimpleNamespace(authorized_credentials=lambda: api_calls.append("oauth")),
+        api_builder=lambda credentials: api_calls.append("api"),
+        video_validator=lambda path: api_calls.append("validate"),
+    )
+    publisher.request_review(production_id)
+    publisher.approve(production_id)
+    video_path.write_bytes(b"different video after review")
+
+    with pytest.raises(YouTubePublishError, match="differs from the artifact"):
+        publisher.request_review(production_id)
+    with pytest.raises(YouTubePublishError, match="differs from the artifact"):
+        publisher.upload(production_id)
+
+    assert api_calls == []
+    assert get_upload(production_id, database_path)["status"] == "approved"
+    assert get_upload(production_id, database_path)["attempt_count"] == 0
+
+
+def test_upload_rechecks_reviewed_video_immediately_before_first_chunk(tmp_path) -> None:
+    database_path = tmp_path / "app.sqlite3"
+    production_id, video_path = make_completed_production(database_path, tmp_path / "production")
+    chunk_calls = []
+
+    class UploadRequest:
+        resumable_uri = None
+
+        def next_chunk(self, num_retries):
+            chunk_calls.append(num_retries)
+            return None, {"id": "unexpected-video-id"}
+
+    class Videos:
+        def insert(self, **kwargs):
+            return UploadRequest()
+
+    class OAuthFixture:
+        def authorized_credentials(self):
+            return object()
+
+    def build_api(credentials):
+        video_path.write_bytes(b"changed while preparing upload")
+        return SimpleNamespace(videos=lambda: Videos())
+
+    publisher = YouTubePublisher(
+        database_path,
+        oauth=OAuthFixture(),
+        api_builder=build_api,
+        media_upload_factory=lambda path: object(),
+        video_validator=lambda path: {"valid": True},
+    )
+    publisher.request_review(production_id)
+    publisher.approve(production_id)
+
+    with pytest.raises(YouTubePublishError, match="differs from the artifact"):
+        publisher.upload(production_id)
+
+    assert chunk_calls == []
 
 
 @pytest.mark.parametrize(
