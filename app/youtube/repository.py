@@ -759,14 +759,17 @@ def get_publish_report_summary(
             (start_at, end_at),
         ).fetchall()
         public_urls = connection.execute(
-            """SELECT production_id, video_id, video_url FROM youtube_uploads
+            """SELECT production_id, video_id,
+                COALESCE(video_url, 'https://www.youtube.com/watch?v=' || video_id) AS video_url
+            FROM youtube_uploads
             WHERE status = 'uploaded' AND visibility = 'public' AND uploaded_at >= ? AND uploaded_at < ?
             ORDER BY uploaded_at""",
             (start_at, end_at),
         ).fetchall()
         waiting = connection.execute(
             """SELECT
-                (SELECT COUNT(*) FROM scripts WHERE status = 'needs_review') +
+                (SELECT COUNT(*) FROM scripts WHERE status = 'needs_review'
+                    OR (status = 'completed' AND reviewed_at IS NULL AND reviewed_by IS NULL)) +
                 (SELECT COUNT(*) FROM productions WHERE status = 'needs_review') +
                 (SELECT COUNT(*) FROM publishing_approvals WHERE state = 'awaiting_review') AS count"""
         ).fetchone()["count"]

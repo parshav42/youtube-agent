@@ -266,20 +266,27 @@ class AutoPublishService:
         production = get_production_by_id(production_id, self.database_path)
         if production is None:
             raise RuntimeError("Production record is missing.")
-        if production["metadata"].get("review_decision"):
-            raise RuntimeError("Production already has a review decision.")
         metadata = dict(production["metadata"])
+        existing_decision = metadata.get("review_decision")
+        if existing_decision and existing_decision.get("reviewer") != "auto-publish-policy":
+            raise RuntimeError("Production already has a human review decision.")
         if production["status"] != "completed":
             reasons = [f"production status is {production['status']!r}, not completed"]
             metadata["auto_approval"] = {"status": "needs_review", "reasons": reasons}
-            update_production(production_id, "needs_review", metadata, database_path=self.database_path)
+            update_production(
+                production_id,
+                production["status"],
+                metadata,
+                error=production.get("error"),
+                database_path=self.database_path,
+            )
             return reasons
         video_path = Path(metadata.get("video", {}).get("path", ""))
         try:
             current_hash = video_sha256(video_path)
         except OSError:
             current_hash = ""
-        if current_hash:
+        if current_hash and not existing_decision:
             metadata["review_decision"] = {
                 "decision": "approve",
                 "reviewer": "auto-publish-policy",
@@ -298,15 +305,15 @@ class AutoPublishService:
             metadata["auto_approval"] = {"status": "needs_review", "reasons": failures}
             update_production(production_id, "needs_review", metadata, database_path=self.database_path)
             return failures
-        decision = {
-            "decision": "approve",
-            "reviewer": "auto-publish-policy",
-            "confirmed": True,
-            "reviewed_at": datetime.now(timezone.utc).isoformat(),
-            "video_sha256": video_sha256(video_path),
-            "policy": "configured quality, safety, provenance, and integrity gates",
-        }
-        metadata["review_decision"] = decision
+        if not existing_decision:
+            metadata["review_decision"] = {
+                "decision": "approve",
+                "reviewer": "auto-publish-policy",
+                "confirmed": True,
+                "reviewed_at": datetime.now(timezone.utc).isoformat(),
+                "video_sha256": video_sha256(video_path),
+                "policy": "configured quality, safety, provenance, and integrity gates",
+            }
         metadata["auto_approval"] = {"status": "approved", "reasons": []}
         update_production(production_id, "completed", metadata, database_path=self.database_path)
         artifact_path = Path(production["output_dir"]) / "metadata.json"

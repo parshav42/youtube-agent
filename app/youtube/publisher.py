@@ -1,6 +1,7 @@
 """Human-approved, resumable YouTube Data API uploads."""
 
 import json
+import mimetypes
 import os
 import re
 from datetime import datetime, timezone
@@ -82,12 +83,14 @@ class YouTubePublisher:
         oauth: GoogleOAuthService | None = None,
         api_builder: Callable[..., Any] | None = None,
         media_upload_factory: Callable[..., Any] | None = None,
+        thumbnail_upload_factory: Callable[..., Any] | None = None,
         video_validator: Callable[[str | Path], dict[str, Any]] = validate_video,
     ) -> None:
         self.database_path = database_path or get_database_path()
         self.oauth = oauth or GoogleOAuthService(str(self.database_path))
         self.api_builder = api_builder or self._build_api
         self.media_upload_factory = media_upload_factory or self._media_upload
+        self.thumbnail_upload_factory = thumbnail_upload_factory or self._thumbnail_upload
         self.video_validator = video_validator
 
     def request_review(
@@ -745,6 +748,11 @@ class YouTubePublisher:
         except Exception as error:
             raise YouTubePublishError("HF-generated YouTube metadata failed validation.") from error
         tags = normalized.tags or [tag.lstrip("#") for tag in normalized.hashtags]
+        if not any(tag.casefold() == "shorts" for tag in tags) and len(tags) < 30:
+            tags.append("Shorts")
+        description = normalized.description
+        if "#shorts" not in description.casefold():
+            description = f"{description.rstrip()}\n\n#Shorts"
         language = generated.get("language") or self._language_code(
             production.get("metadata", {}).get("language", "")
         ) or normalized.language
@@ -752,7 +760,7 @@ class YouTubePublisher:
             return PublishingMetadata.model_validate(
                 {
                     "title": normalized.title,
-                    "description": normalized.description,
+                    "description": description,
                     "tags": tags,
                     "language": language,
                     "category_id": os.getenv("YOUTUBE_CATEGORY_ID", normalized.category_id),
@@ -775,11 +783,19 @@ class YouTubePublisher:
         outcomes: dict[str, Any] = {}
         thumbnail = production.get("metadata", {}).get("thumbnail")
         thumbnail_path = thumbnail.get("path") if isinstance(thumbnail, dict) else None
-        if thumbnail_path and Path(thumbnail_path).is_file():
+        root = Path(production["output_dir"]).resolve()
+        resolved_thumbnail = Path(thumbnail_path).resolve() if thumbnail_path else None
+        if (
+            resolved_thumbnail
+            and root in resolved_thumbnail.parents
+            and resolved_thumbnail.is_file()
+            and resolved_thumbnail.suffix.lower() in {".jpg", ".jpeg", ".png"}
+            and resolved_thumbnail.stat().st_size <= 2 * 1024 * 1024
+        ):
             try:
                 service.thumbnails().set(
                     videoId=video_id,
-                    media_body=self.media_upload_factory(Path(thumbnail_path)),
+                    media_body=self.thumbnail_upload_factory(resolved_thumbnail),
                 ).execute(num_retries=2)
                 outcomes["thumbnail"] = "uploaded"
             except Exception:
@@ -896,3 +912,12 @@ class YouTubePublisher:
         from googleapiclient.http import MediaFileUpload
 
         return MediaFileUpload(str(path), mimetype="video/mp4", chunksize=8 * 1024 * 1024, resumable=True)
+
+    @staticmethod
+    def _thumbnail_upload(path: Path) -> Any:
+        from googleapiclient.http import MediaFileUpload
+
+        mimetype = mimetypes.guess_type(path.name)[0]
+        if mimetype not in {"image/jpeg", "image/png"}:
+            raise YouTubePublishError("Thumbnail must be a JPEG or PNG image.")
+        return MediaFileUpload(str(path), mimetype=mimetype, resumable=False)
