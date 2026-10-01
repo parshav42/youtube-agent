@@ -2,6 +2,8 @@
 
 from collections.abc import Mapping
 from datetime import datetime
+import hashlib
+from pathlib import Path
 from typing import Any
 
 
@@ -23,6 +25,14 @@ def has_recorded_decision(value: Any, decision: str) -> bool:
     except ValueError:
         return False
     return timestamp.tzinfo is not None
+
+
+def video_sha256(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as video:
+        for chunk in iter(lambda: video.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def production_qa_allows_approval(metadata: Any) -> bool:
