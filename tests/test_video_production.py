@@ -355,7 +355,8 @@ def test_production_failure_persists_audio_and_resume_renders_playable_mp4(tmp_p
     review_html = Path(page.path).read_text(encoding="utf-8")
     review_js = (Path(__file__).resolve().parents[1] / "app" / "static" / "production-review.js").read_text(encoding="utf-8")
     assert "Final video review" in review_html
-    assert ".textContent=value" in review_js
+    assert ".textContent =" in review_js
+    assert ".innerHTML" not in review_js
     assert "/upload" not in review_html + review_js
     with pytest.raises(YouTubePublishError, match="Only completed productions"):
         YouTubePublisher(database_path).request_review(failed["id"])
