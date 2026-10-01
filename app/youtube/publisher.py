@@ -216,6 +216,12 @@ class YouTubePublisher:
         except Exception as error:
             resumable_uri = getattr(request, "resumable_uri", None) if request is not None else None
             if isinstance(error, YouTubePublishError) and not upload_started:
+                self._mark_failed(
+                    production_id,
+                    approval["visibility"],
+                    resumable_uri,
+                    str(error),
+                )
                 raise
             http_status = getattr(getattr(error, "resp", None), "status", None)
             if http_status == 401:
