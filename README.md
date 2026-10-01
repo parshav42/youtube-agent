@@ -105,6 +105,16 @@ Run its offline tests with:
 
 Day 10 adds an opt-in Edge TTS adapter to the same interface. `MOTIVATIONOS_AUDIO_PROVIDER` is unset by default; select `mock` for a local tone fixture or `edge-tts` to explicitly allow the Edge network service. `MOTIVATIONOS_AUDIO_TIMEOUT_SECONDS` sets the request timeout, and the existing `EDGE_TTS_VOICE` selects the voice. The new module rejects ElevenLabs selection and never reads its credentials. Real generation remains a direct, explicit call to `generate_audio_for_approved_script`; it does not enter the video production, publishing, or scheduling workflows. Tests replace the Edge client and do not contact the service.
 
+Day 11 adds independent offline checks in `app.audio.quality`. `run_audio_quality_assurance(path, target_duration_seconds=...)` returns file validity, format, duration, size, silence/clipping measurements, target deviation, findings, and a technical status. Defaults: 25 MiB maximum file size, 0.1-second minimum audio duration, 2-second target tolerance, silence below -50 dBFS for at least 0.25 seconds, clipping at or above 0.99 full scale, 10 ms measurement windows, 8 kHz compressed-audio analysis, 120-second analysis cap, and a 30-second FFmpeg timeout. WAV samples are inspected with Python's standard library. Compressed audio is decoded by FFmpeg to mono 8 kHz PCM; those signal measurements are marked approximate and always require review. Missing capabilities are reported as unavailable, not passed. A technical pass does not assess pronunciation, factual correctness, or voice naturalness.
+
+Run the offline QA tests with:
+
+```bash
+.venv/bin/pytest -q tests/test_audio_quality.py
+```
+
+Day 12 adds `app.audio.review_service.generate_audio_for_human_review`. It requires an approved script ID, an explicit database path, output directory and simple output filename, and an explicitly selected provider. It returns generation metadata and the QA report together; the QA status is informational and never changes script review state or approves audio. The service is library-only: no API route is added because a request could create local files or invoke an explicitly selected network TTS provider. A local caller can present the returned structured report to a human reviewer. `needs_review`, `failed`, and unavailable checks remain visible as returned by the QA engine.
+
 ### Licensed visuals
 
 Set `MOTIVATIONOS_LICENSED_ASSET_DIR` to a directory of user-supplied, authorized still images. Day 3 does not scrape sites, follow arbitrary URLs, download creator content, or fabricate replacement assets. Provide one image for each scene, using `scene_01.jpg`, `scene_02.png`, etc. Supported formats: JPEG, PNG, WebP; minimum dimensions 320x320. Add a `LICENSES.json` file keyed by each exact filename:
