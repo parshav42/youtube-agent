@@ -30,7 +30,7 @@ from app.youtube.analytics import YouTubeAnalyticsError, YouTubeAnalyticsService
 from app.youtube.auth import GoogleOAuthService, YouTubeAuthError
 from app.youtube.publisher import YouTubePublishError, YouTubePublisher
 from app.youtube.repository import initialize_youtube_database
-from app.video.review_gates import production_qa_allows_approval
+from app.video.review_gates import production_qa_allows_approval, video_sha256
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -204,6 +204,12 @@ def create_app(
             "confirmed": True,
             "reviewed_at": datetime.now(timezone.utc).isoformat(),
         }
+        if decision == "approve":
+            output_root = Path(record["output_dir"]).resolve()
+            video_path = (output_root / "final.mp4").resolve()
+            if output_root not in video_path.parents or not video_path.is_file():
+                raise HTTPException(status_code=409, detail="Final video is unavailable for approval.")
+            meta["review_decision"]["video_sha256"] = video_sha256(video_path)
         status = "completed" if decision == "approve" else "rejected"
         if decision == "approve":
             artifact_path = Path(record["output_dir"]).resolve() / "metadata.json"
