@@ -115,6 +115,8 @@ Run the offline QA tests with:
 
 Day 12 adds `app.audio.review_service.generate_audio_for_human_review`. It requires an approved script ID, an explicit database path, output directory and simple output filename, and an explicitly selected provider. It returns generation metadata and the QA report together; the QA status is informational and never changes script review state or approves audio. The service is library-only: no API route is added because a request could create local files or invoke an explicitly selected network TTS provider. A local caller can present the returned structured report to a human reviewer. `needs_review`, `failed`, and unavailable checks remain visible as returned by the QA engine.
 
+Day 13 refines the same library service into a structured workflow result. `workflow_status` reports `completed`, `blocked`, or `failed`; `generation_status` distinguishes `generated`, `not_run`, `unavailable`, `timed_out`, and `failed`; `qa_status` is passed through from the QA report or is `not_run`. The report includes script ID, provider type, generation metadata, QA findings, and safe error text. Provider details, filesystem paths, and internal exception text are not included in failure messages. A completed workflow is not audio approval: QA `needs_review` and `failed` remain separate human decisions.
+
 ### Licensed visuals
 
 Set `MOTIVATIONOS_LICENSED_ASSET_DIR` to a directory of user-supplied, authorized still images. Day 3 does not scrape sites, follow arbitrary URLs, download creator content, or fabricate replacement assets. Provide one image for each scene, using `scene_01.jpg`, `scene_02.png`, etc. Supported formats: JPEG, PNG, WebP; minimum dimensions 320x320. Add a `LICENSES.json` file keyed by each exact filename:

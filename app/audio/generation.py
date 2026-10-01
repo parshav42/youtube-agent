@@ -31,6 +31,18 @@ class AudioProviderUnavailableError(AudioGenerationError):
     """Raised when the requested provider is not implemented or unavailable."""
 
 
+class AudioProviderTimeoutError(AudioGenerationError):
+    """Raised when an explicitly invoked audio provider exceeds its timeout."""
+
+
+class ApprovedScriptNotFoundError(AudioGenerationError):
+    """Raised when the requested script identifier does not exist."""
+
+
+class ScriptApprovalRequiredError(AudioGenerationError):
+    """Raised when a script has not passed the existing human approval gate."""
+
+
 class AudioProvider(Protocol):
     """Provider contract for audio generated from approved script text."""
 
@@ -155,7 +167,7 @@ class EdgeTTSAudioAdapter:
         except Exception as error:
             _remove_partial_output(destination)
             if "timed out" in str(error).lower():
-                raise AudioGenerationError("Edge TTS request timed out.") from None
+                raise AudioProviderTimeoutError("Audio provider request timed out.") from None
             raise AudioGenerationError(
                 "Edge TTS request failed; check network, service, and voice configuration."
             ) from None
@@ -298,11 +310,15 @@ def generate_audio_for_approved_script(
     """
     record = get_script_by_id(script_id, database_path)
     if record is None:
-        raise AudioGenerationError(f"Script record {script_id} was not found.")
+        raise ApprovedScriptNotFoundError("Script record was not found.")
     if record["status"] != "approved":
-        raise AudioGenerationError("Explicit human approval is required before audio generation.")
+        raise ScriptApprovalRequiredError(
+            "Explicit human approval is required before audio generation."
+        )
     if not record["reviewed_at"] or not record["reviewed_by"]:
-        raise AudioGenerationError("Approved script is missing its human-review audit metadata.")
+        raise ScriptApprovalRequiredError(
+            "Approved script is missing its human-review audit metadata."
+        )
     try:
         evaluation = ScriptEvaluation.model_validate(record["evaluation"])
         script = MotivationalScript.model_validate(record["script"])
