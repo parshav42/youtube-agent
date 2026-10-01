@@ -429,6 +429,10 @@ def test_upload_rechecks_reviewed_video_immediately_before_first_chunk(tmp_path)
         publisher.upload(production_id)
 
     assert chunk_calls == []
+    failed = get_upload(production_id, database_path)
+    assert failed["status"] == "failed"
+    assert "differs from the artifact" in failed["error"]
+    assert failed["resumable_uri"] is None
 
 
 @pytest.mark.parametrize(
