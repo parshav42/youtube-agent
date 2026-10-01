@@ -8,12 +8,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.config import get_database_path
-from app.schemas.script_schema import MotivationalScript
+from app.schemas.script_schema import MotivationalScript, ScriptEvaluation
 
 ResearchResult = BaseModel | Mapping[str, Any]
+
+
+class ScriptReviewError(ValueError):
+    """Raised when a script cannot enter the requested human-review state."""
+
+
+class ScriptNotFoundError(ScriptReviewError):
+    """Raised when a review references a missing script."""
 
 
 def _resolve_path(database_path: str | Path | None) -> Path:
@@ -77,7 +85,9 @@ def initialize_database(database_path: str | Path | None = None) -> None:
                 quality_score REAL NOT NULL,
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                evaluation_json TEXT
+                evaluation_json TEXT,
+                reviewed_at TEXT,
+                reviewed_by TEXT
             )
             """
         )
@@ -86,6 +96,11 @@ def initialize_database(database_path: str | Path | None = None) -> None:
         }
         if "evaluation_json" not in script_columns:
             connection.execute("ALTER TABLE scripts ADD COLUMN evaluation_json TEXT")
+        if "reviewed_at" not in script_columns:
+            connection.execute("ALTER TABLE scripts ADD COLUMN reviewed_at TEXT")
+
+        if "reviewed_by" not in script_columns:
+            connection.execute("ALTER TABLE scripts ADD COLUMN reviewed_by TEXT")
 
 
 def _serialize_result(result: ResearchResult) -> dict[str, Any]:
@@ -185,12 +200,14 @@ def _decode_script(row: sqlite3.Row | None) -> dict[str, Any] | None:
         "evaluation": json.loads(row["evaluation_json"]) if row["evaluation_json"] else None,
         "status": row["status"],
         "created_at": row["created_at"],
+        "reviewed_at": row["reviewed_at"],
+        "reviewed_by": row["reviewed_by"],
     }
 
 
 def save_script(
     script: BaseModel | Mapping[str, Any],
-    status: str = "completed",
+    status: str = "needs_review",
     database_path: str | Path | None = None,
     evaluation: BaseModel | Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -204,8 +221,8 @@ def save_script(
         raise ValueError("The script topic must be a non-empty string.")
     if not isinstance(language, str) or not language.strip():
         raise ValueError("The script language must be a non-empty string.")
-    if not isinstance(status, str) or not status.strip():
-        raise ValueError("The script status must be a non-empty string.")
+    if status != "needs_review":
+        raise ValueError("New scripts must start in 'needs_review' status.")
     if not isinstance(quality_score, (int, float)):
         raise ValueError("The script quality score must be numeric.")
     initialize_database(database_path)
@@ -230,7 +247,7 @@ def save_script(
         )
         row = connection.execute(
             """
-            SELECT id, topic, language, script_json, quality_score, status, created_at, evaluation_json
+            SELECT id, topic, language, script_json, quality_score, status, created_at, evaluation_json, reviewed_at, reviewed_by
             FROM scripts WHERE id = ?
             """,
             (cursor.lastrowid,),
@@ -249,7 +266,7 @@ def get_script_by_id(
     with _connection(database_path) as connection:
         row = connection.execute(
             """
-            SELECT id, topic, language, script_json, quality_score, status, created_at, evaluation_json
+            SELECT id, topic, language, script_json, quality_score, status, created_at, evaluation_json, reviewed_at, reviewed_by
             FROM scripts WHERE id = ?
             """,
             (script_id,),
@@ -267,12 +284,107 @@ def get_recent_scripts(
     with _connection(database_path) as connection:
         rows = connection.execute(
             """
-            SELECT id, topic, language, script_json, quality_score, status, created_at, evaluation_json
+            SELECT id, topic, language, script_json, quality_score, status, created_at, evaluation_json, reviewed_at, reviewed_by
             FROM scripts ORDER BY created_at DESC, id DESC LIMIT ?
             """,
             (limit,),
         ).fetchall()
     return [record for row in rows if (record := _decode_script(row)) is not None]
+
+
+def get_scripts_needing_review(
+    database_path: str | Path | None = None, limit: int = 100
+) -> list[dict[str, Any]]:
+    """Return scripts awaiting an explicit human decision, newest first."""
+    if limit < 1:
+        raise ValueError("limit must be at least 1.")
+    initialize_database(database_path)
+    with _connection(database_path) as connection:
+        rows = connection.execute(
+            """SELECT id, topic, language, script_json, quality_score, status,
+                created_at, evaluation_json, reviewed_at, reviewed_by
+            FROM scripts
+            WHERE status = 'needs_review'
+                OR (status = 'completed' AND reviewed_at IS NULL AND reviewed_by IS NULL)
+            ORDER BY created_at DESC, id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [record for row in rows if (record := _decode_script(row)) is not None]
+
+
+def review_script(
+    script_id: int,
+    decision: str,
+    reviewer: str = "local_admin",
+    database_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Record one explicit human approval or rejection of a pending script."""
+    if not isinstance(decision, str) or decision not in {"approved", "rejected"}:
+        raise ScriptReviewError("Decision must be 'approved' or 'rejected'.")
+    if not isinstance(reviewer, str) or not reviewer.strip():
+        raise ScriptReviewError("Reviewer must not be empty.")
+    initialize_database(database_path)
+    reviewed_at = datetime.now(timezone.utc).isoformat()
+    with _connection(database_path) as connection:
+        row = connection.execute("SELECT * FROM scripts WHERE id = ?", (script_id,)).fetchone()
+        if row is None:
+            raise ScriptNotFoundError(f"Script not found: {script_id}")
+        current_status = row["status"]
+        is_legacy_completed = (
+            current_status == "completed"
+            and row["reviewed_at"] is None
+            and row["reviewed_by"] is None
+        )
+        if current_status != "needs_review" and not is_legacy_completed:
+            raise ScriptReviewError(
+                "Only scripts awaiting human review or unreviewed legacy scripts can be reviewed."
+            )
+        if decision == "approved":
+            try:
+                evaluation = ScriptEvaluation.model_validate(
+                    json.loads(row["evaluation_json"])
+                ) if row["evaluation_json"] else None
+            except (json.JSONDecodeError, ValidationError) as error:
+                raise ScriptReviewError(
+                    "A valid passing quality evaluation is required before approval."
+                ) from error
+            if evaluation is None or not evaluation.passed or not all(
+                value
+                for name, value in evaluation.model_dump().items()
+                if name not in {"quality_score", "threshold", "passed", "feedback"}
+            ):
+                raise ScriptReviewError(
+                    "A script must pass quality evaluation before approval."
+                )
+        if is_legacy_completed:
+            cursor = connection.execute(
+                """
+                UPDATE scripts
+                SET status = ?, reviewed_at = ?, reviewed_by = ?
+                WHERE id = ? AND status = 'completed'
+                    AND reviewed_at IS NULL AND reviewed_by IS NULL
+                """,
+                (decision, reviewed_at, reviewer.strip(), script_id),
+            )
+        else:
+            cursor = connection.execute(
+                """
+                UPDATE scripts
+                SET status = ?, reviewed_at = ?, reviewed_by = ?
+                WHERE id = ? AND status = 'needs_review'
+                """,
+                (decision, reviewed_at, reviewer.strip(), script_id),
+            )
+        if cursor.rowcount != 1:
+            raise ScriptReviewError("Script review was already recorded by another request.")
+        updated_row = connection.execute(
+            "SELECT * FROM scripts WHERE id = ?", (script_id,)
+        ).fetchone()
+    record = _decode_script(updated_row)
+    if record is None:
+        raise RuntimeError("The reviewed script could not be read back.")
+    return record
+
 
 
 def _decode_production(row: sqlite3.Row | None) -> dict[str, Any] | None:

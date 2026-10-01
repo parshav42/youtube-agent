@@ -1,0 +1,1 @@
+"""Safe, opt-in audio generation primitives."""

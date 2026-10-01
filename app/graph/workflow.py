@@ -287,14 +287,9 @@ def build_workflow(
         evaluation = state.get("evaluation")
         if script is None or evaluation is None:
             return {}
-        status = (
-            "completed"
-            if evaluation.passed and not state.get("require_human_review", False)
-            else "needs_review"
-        )
         record = save_script(
             script,
-            status=status,
+            status="needs_review",
             evaluation=evaluation,
             database_path=database_path,
         )

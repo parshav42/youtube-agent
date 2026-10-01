@@ -14,7 +14,7 @@ from app.database.db import (
     update_production,
 )
 from app.providers.huggingface_llm import HuggingFaceLLMProvider
-from app.schemas.script_schema import MotivationalScript
+from app.schemas.script_schema import MotivationalScript, ScriptEvaluation
 from app.video.subtitle_engine import generate_srt
 from app.video.tts_engine import build_tts_provider, validate_audio
 from app.video.video_assembler import VideoAssembler
@@ -42,14 +42,8 @@ class ProductionService:
         self.assembler = assembler or VideoAssembler()
 
     def produce_script_record(self, script_id: int) -> dict[str, Any]:
-        """Create a production from one quality-approved, persisted Day 2 script."""
-        script_record = get_script_by_id(script_id, self.database_path)
-        if script_record is None:
-            raise ValueError(f"Script record {script_id} was not found.")
-        if script_record["status"] != "completed":
-            raise ValueError(
-                f"Script record {script_id} is {script_record['status']!r}; only completed scripts can be produced."
-            )
+        """Create a production only from an explicitly human-approved script."""
+        script_record = self._load_approved_script(script_id)
         script = MotivationalScript.model_validate(script_record["script"])
         production_id = uuid.uuid4().hex
         output_dir = self.output_root / production_id
@@ -72,11 +66,36 @@ class ProductionService:
             raise ValueError(
                 f"Production {production_id} has status {production['status']!r}; only failed runs can resume."
             )
-        script_record = get_script_by_id(production["script_id"], self.database_path)
-        if script_record is None or script_record["status"] != "completed":
-            raise ValueError("The source approved script record is no longer available.")
+        script_record = self._load_approved_script(production["script_id"])
         script = MotivationalScript.model_validate(script_record["script"])
         return self._run(production, script)
+
+    def _load_approved_script(self, script_id: int) -> dict[str, Any]:
+        script_record = get_script_by_id(script_id, self.database_path)
+        if script_record is None:
+            raise ValueError(f"Script record {script_id} was not found.")
+        if script_record["status"] != "approved":
+            status = script_record["status"]
+            if status == "completed":
+                raise ValueError(
+                    f"Script record {script_id} has legacy status 'completed'; explicit human approval is required."
+                )
+            raise ValueError(
+                f"Script record {script_id} is {status!r}; explicit human approval is required before production."
+            )
+        if not script_record["reviewed_at"] or not script_record["reviewed_by"]:
+            raise ValueError("Approved script is missing its human-review audit metadata.")
+        try:
+            evaluation = ScriptEvaluation.model_validate(script_record["evaluation"])
+        except Exception as error:
+            raise ValueError("Approved script has no valid quality evaluation.") from error
+        if not evaluation.passed or not all(
+            value
+            for name, value in evaluation.model_dump().items()
+            if name not in {"quality_score", "threshold", "passed", "feedback"}
+        ):
+            raise ValueError("Approved script does not have a passing quality evaluation.")
+        return script_record
 
     def _run(
         self, production: dict[str, Any], script: MotivationalScript

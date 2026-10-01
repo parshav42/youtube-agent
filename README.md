@@ -95,6 +95,14 @@ Google enforces project-level API quotas, OAuth consent/testing policies, channe
 - `MOTIVATIONOS_TTS_PROVIDER=edge-tts` explicitly selects the Edge TTS network service with `EDGE_TTS_VOICE` (default `hi-IN-SwaraNeural`). It has no API-key setting, but depends on network/service availability and applicable service terms. No synthetic/fake audio fallback exists.
 - Audio is probed by FFprobe before it is accepted.
 
+Day 9 adds an independent, opt-in audio foundation in `app.audio.generation`. It accepts only scripts already marked approved with review metadata and a passing evaluation, and reads their SQLite record without changing review state or creating production records. `build_audio_provider("mock")` selects a deterministic tone WAV fixture explicitly labeled as not speech; real providers are not selected or called by this module. `validate_audio_file` accepts WAV, MP3, M4A, AAC, FLAC, and OGG files, enforces a 25 MiB default limit (customizable with `max_size_bytes`), and uses FFprobe for compressed formats. The module is not connected to the video production workflow.
+
+Run its offline tests with:
+
+```bash
+.venv/bin/pytest -q tests/test_audio_generation.py
+```
+
 ### Licensed visuals
 
 Set `MOTIVATIONOS_LICENSED_ASSET_DIR` to a directory of user-supplied, authorized still images. Day 3 does not scrape sites, follow arbitrary URLs, download creator content, or fabricate replacement assets. Provide one image for each scene, using `scene_01.jpg`, `scene_02.png`, etc. Supported formats: JPEG, PNG, WebP; minimum dimensions 320x320. Add a `LICENSES.json` file keyed by each exact filename:
@@ -127,7 +135,83 @@ Generate a Day 2 script (requires HF configuration):
 python -m app.main --topic "Consistency during exam season" --duration 35
 ```
 
-Use `--draft-for-review` to keep the saved script in `needs_review` even when automated checks pass. Generated scripts are never human-approved by the model.
+Every generated script is saved as `needs_review`, even when its automated quality evaluation passes. A passing evaluation makes it eligible for human review; it is not approval. The `--draft-for-review` flag remains as a deprecated compatibility option.
+
+Use the authenticated local API to review scripts:
+
+- `GET /api/scripts/review` lists scripts awaiting review.
+- `GET /api/scripts/{script_id}/review` returns the script's current review state.
+- `POST /api/scripts/{script_id}/approve` explicitly approves a passing script.
+- `POST /api/scripts/{script_id}/reject` explicitly rejects a script.
+
+Approval and rejection require the admin Bearer token and a JSON body containing `{"confirm_review": true, "reviewer": "your-reviewer-id"}`. Script review is separate from YouTube publishing approval. The review endpoints only update script review state; they do not start production or upload a video.
+
+Unreviewed legacy scripts with status `completed` also appear in the review queue. They are not production-approved; an admin must make a new confirmed decision. The review details response includes the script and its quality evaluation so the reviewer can inspect both before deciding.
+
+### Local Script Review Dashboard (Day 8)
+
+The same FastAPI service serves a local review UI at `http://127.0.0.1:8000/review`. It uses the existing review endpoints and has no production, scheduling, or publishing controls. On the sign-in form, enter a reviewer name and the value configured as `MOTIVATIONOS_ADMIN_TOKEN`; the token stays in page memory only and is cleared on sign-out or when the tab closes. The browser sends it only as the Bearer token to the same-origin local API.
+
+Start the dashboard from the project directory. The `.env` file must already contain a locally configured admin token; do not paste or print it in a command:
+
+```bash
+cd ~/MotivationOS
+source .venv/bin/activate
+set -a
+. ./.env
+set +a
+export MOTIVATIONOS_SCHEDULER_ENABLED=false
+.venv/bin/uvicorn app.api:app --host 127.0.0.1 --port 8000 --no-access-log
+```
+
+Open `http://127.0.0.1:8000/review` in your browser. The service is bound to loopback and must not be exposed publicly. The UI does not persist the admin token. Approving only changes script review status and makes an eligible script available to the separate production command; it never starts production. Rejection records the decision and removes the script from the review queue. These decisions update the database selected by `MOTIVATIONOS_DB_PATH` (default `data/motivationos.sqlite3`), so use a separate temporary database when exploring with test data.
+
+Run the focused dashboard and review tests, check JavaScript syntax, and compile Python with:
+
+```bash
+.venv/bin/pytest -q tests/test_review_dashboard.py tests/test_script_review.py
+node --check app/static/review.js
+python -m compileall -q app
+git diff --check
+```
+
+Run the full offline test suite with:
+
+```bash
+.venv/bin/pytest -q
+```
+
+For local development, set an admin token in your shell and start the API on loopback with scheduled jobs disabled:
+
+```bash
+export MOTIVATIONOS_ADMIN_TOKEN='replace-with-a-local-test-value'
+export MOTIVATIONOS_SCHEDULER_ENABLED=false
+.venv/bin/uvicorn app.api:app --host 127.0.0.1 --port 8000 --no-access-log
+```
+
+In another terminal, list pending and legacy scripts or inspect one script. Replace `1` with an ID from the list:
+
+```bash
+curl -H "Authorization: Bearer $MOTIVATIONOS_ADMIN_TOKEN" http://127.0.0.1:8000/api/scripts/review
+curl -H "Authorization: Bearer $MOTIVATIONOS_ADMIN_TOKEN" http://127.0.0.1:8000/api/scripts/1/review
+```
+
+Approval or rejection requires a deliberate POST with `confirm_review: true`; for example:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/scripts/1/approve \\
+  -H "Authorization: Bearer $MOTIVATIONOS_ADMIN_TOKEN" \\
+  -H 'Content-Type: application/json' \\
+  -d '{"confirm_review":true,"reviewer":"local-admin"}'
+```
+
+Run the isolated review, database, and script-workflow tests with:
+
+```bash
+.venv/bin/pytest -q tests/test_script_review.py tests/test_database.py tests/test_script_workflow.py
+```
+
+This local review walkthrough does not require an LLM call. Production remains separately gated on a passing evaluation and recorded human approval; the API review routes do not render video, upload or schedule YouTube content, or send email. The Day 7 verification uses temporary databases and mocked production gates. Real media rendering, YouTube actions, email delivery, and paid-provider behavior are not part of that verification.
 
 Retain Day 1's bundled sample research, or explicitly use HF research:
 
@@ -136,7 +220,7 @@ python -m app.main --research
 python -m app.main --research-with-hf --niche "Hinglish discipline"
 ```
 
-Produce a video from an existing script-table record only when its status is `completed`:
+Produce a video from a script-table record only after explicit script approval. Legacy `completed` records are not treated as approved:
 
 ```bash
 python -m app.main --produce-script 2

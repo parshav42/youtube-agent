@@ -8,10 +8,19 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.config import get_database_path
+from app.database.db import (
+    ScriptNotFoundError,
+    ScriptReviewError,
+    get_script_by_id,
+    get_scripts_needing_review,
+    review_script,
+)
 from app.reporting.daily_report import DailyReportService
 from app.reporting.scheduler import build_scheduler, run_scheduled_report
 from app.youtube.analytics import YouTubeAnalyticsError, YouTubeAnalyticsService
@@ -34,6 +43,20 @@ class ApprovalRequest(BaseModel):
     confirm_approval: bool
     visibility: str | None = Field(default=None, pattern="^(private|unlisted|public)$")
     confirm_public: bool = False
+
+
+class ScriptReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm_review: bool
+    reviewer: str = Field(min_length=1, max_length=100)
+
+    @field_validator("reviewer", mode="before")
+    @classmethod
+    def require_reviewer_name(cls, value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("Reviewer must not be empty.")
+        return value.strip()
 
 
 def create_app(
@@ -74,6 +97,25 @@ def create_app(
     application.state.publisher = resolved_publisher
     application.state.analytics = resolved_analytics
     application.state.reports = resolved_reports
+    static_directory = Path(__file__).with_name("static")
+    application.mount(
+        "/review-assets", StaticFiles(directory=static_directory), name="review-assets"
+    )
+
+    @application.get("/review", include_in_schema=False)
+    def review_dashboard() -> FileResponse:
+        return FileResponse(
+            static_directory / "review.html",
+            headers={
+                "Content-Security-Policy": (
+                    "default-src 'none'; script-src 'self'; style-src 'self'; "
+                    "connect-src 'self'; img-src 'self' data:; base-uri 'none'; "
+                    "form-action 'none'; frame-ancestors 'none'"
+                ),
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "no-referrer",
+            },
+        )
 
     def require_admin(
         credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
@@ -84,6 +126,64 @@ def create_app(
         supplied = credentials.credentials if credentials else ""
         if not hmac.compare_digest(supplied, expected):
             raise HTTPException(status_code=401, detail="Administrative authorization required.")
+
+    @application.get("/api/scripts/review", dependencies=[Depends(require_admin)])
+    def scripts_awaiting_review(
+        limit: int = Query(default=100, ge=1, le=1000),
+    ) -> list[dict[str, Any]]:
+        return get_scripts_needing_review(resolved_path, limit)
+
+    @application.get(
+        "/api/scripts/{script_id}/review", dependencies=[Depends(require_admin)]
+    )
+    def script_review_status(script_id: int) -> dict[str, Any]:
+        record = get_script_by_id(script_id, resolved_path)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Script was not found.")
+        return {
+            "script_id": record["id"],
+            "topic": record["topic"],
+            "language": record["language"],
+            "script": record["script"],
+            "created_at": record["created_at"],
+            "status": record["status"],
+            "quality_score": record["quality_score"],
+            "evaluation": record["evaluation"],
+            "reviewed_at": record["reviewed_at"],
+            "reviewed_by": record["reviewed_by"],
+        }
+
+    def record_script_review(
+        script_id: int, decision: str, body: ScriptReviewRequest
+    ) -> dict[str, Any]:
+        if not body.confirm_review:
+            raise HTTPException(status_code=400, detail="Explicit confirm_review=true is required.")
+        try:
+            record = review_script(
+                script_id, decision, body.reviewer, database_path=resolved_path
+            )
+        except ScriptNotFoundError as error:
+            raise HTTPException(status_code=404, detail="Script was not found.") from error
+        except ScriptReviewError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return {
+            "script_id": record["id"],
+            "status": record["status"],
+            "reviewed_at": record["reviewed_at"],
+            "reviewed_by": record["reviewed_by"],
+        }
+
+    @application.post(
+        "/api/scripts/{script_id}/approve", dependencies=[Depends(require_admin)]
+    )
+    def approve_script(script_id: int, body: ScriptReviewRequest) -> dict[str, Any]:
+        return record_script_review(script_id, "approved", body)
+
+    @application.post(
+        "/api/scripts/{script_id}/reject", dependencies=[Depends(require_admin)]
+    )
+    def reject_script(script_id: int, body: ScriptReviewRequest) -> dict[str, Any]:
+        return record_script_review(script_id, "rejected", body)
 
     @application.get("/api/youtube/status", dependencies=[Depends(require_admin)])
     def youtube_status() -> dict[str, Any]:

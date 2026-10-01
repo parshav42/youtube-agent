@@ -76,6 +76,11 @@ def test_script_evaluation_breakdown_is_saved_and_old_rows_migrate(tmp_path) -> 
     initialize_database(database_path)
     old_record = get_script_by_id(1, database_path)
     assert old_record["evaluation"] is None
+    assert old_record["reviewed_at"] is None
+    assert old_record["reviewed_by"] is None
+    with sqlite3.connect(database_path) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(scripts)")}
+    assert {"reviewed_at", "reviewed_by"} <= columns
 
     evaluation = {
         "quality_score": 3.75,

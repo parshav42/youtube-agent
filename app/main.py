@@ -21,7 +21,7 @@ def main() -> int:
     parser.add_argument(
         "--draft-for-review",
         action="store_true",
-        help="Save the generated script as needs_review even if automated checks pass.",
+        help="Deprecated compatibility flag; all generated scripts require explicit human review.",
     )
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--research", action="store_true", help="Run the bundled Day 1 sample-topic workflow.")
@@ -30,10 +30,10 @@ def main() -> int:
     )
     modes.add_argument("--check-hf", action="store_true", help="Make and print a real HF model inference request.")
     modes.add_argument(
-        "--produce-script", type=int, metavar="SCRIPT_ID", help="Produce video for a completed approved script record."
+        "--produce-script", type=int, metavar="SCRIPT_ID", help="Produce video only from a script explicitly approved by a human."
     )
     modes.add_argument(
-        "--resume-production", metavar="PRODUCTION_ID", help="Resume a failed production record."
+        "--resume-production", metavar="PRODUCTION_ID", help="Resume a failed production whose source script remains approved."
     )
     parser.add_argument("--niche", help="Research niche for either research mode.")
     args = parser.parse_args()

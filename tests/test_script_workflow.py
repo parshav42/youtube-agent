@@ -66,7 +66,9 @@ def test_script_graph_runs_saves_sqlite_and_writes_json(tmp_path) -> None:
     assert result["revision_attempts"] == 0
     assert len(script.scenes) in range(4, 8)
     assert sum(scene.duration_seconds for scene in script.scenes) == 35
-    assert record["status"] == "completed"
+    assert record["status"] == "needs_review"
+    assert record["reviewed_at"] is None
+    assert record["reviewed_by"] is None
     assert record["evaluation"] == result["evaluation"].model_dump(mode="json")
     assert get_script_by_id(record["id"], database_path)["script"] == script.model_dump(mode="json")
     assert get_recent_scripts(database_path)[0]["id"] == record["id"]

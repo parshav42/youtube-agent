@@ -9,8 +9,9 @@ from typing import Any
 from PIL import Image
 import pytest
 
+from app.agents.quality_agent import evaluate_script
 from app.agents.script_agent import MockScriptGenerator
-from app.database.db import get_production_by_id, save_script
+from app.database.db import get_production_by_id, review_script, save_script
 from app.graph.workflow import build_workflow
 from app.schemas.script_schema import ProductionMetadata, ScriptRequest
 from app.video.production_service import ProductionService
@@ -76,7 +77,9 @@ class ProductionServiceFixture:
 
 def make_approved_script(database_path: Path) -> int:
     script = MockScriptGenerator().generate(ScriptRequest(topic="discipline"))
-    return save_script(script, status="completed", database_path=database_path)["id"]
+    evaluation = evaluate_script(script)
+    record = save_script(script, evaluation=evaluation, database_path=database_path)
+    return review_script(record["id"], "approved", "test-reviewer", database_path)["id"]
 
 
 def make_asset_library(path: Path, scene_count: int = 5) -> None:
