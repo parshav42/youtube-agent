@@ -1,6 +1,7 @@
 """Local, access-controlled HTTP API for YouTube operations."""
 
 import hmac
+import json
 import os
 from contextlib import asynccontextmanager
 from datetime import date
@@ -197,6 +198,19 @@ def create_app(
             raise HTTPException(status_code=409, detail="Production QA blocks approval.")
         meta["review_decision"] = {"decision": decision, "reviewer": body.reviewer, "confirmed": True}
         status = "completed" if decision == "approve" else "rejected"
+        if decision == "approve":
+            artifact_path = Path(record["output_dir"]).resolve() / "metadata.json"
+            artifact = {"production_id": production_id, "status": status, "metadata": meta, "error": None}
+            temporary_path = artifact_path.with_name("metadata.review.tmp")
+            try:
+                temporary_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                temporary_path.replace(artifact_path)
+            except OSError as error:
+                try:
+                    temporary_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise HTTPException(status_code=500, detail="Production review could not be persisted.") from error
         updated = update_production(production_id, status, meta, database_path=resolved_path)
         return {"production_id": updated["id"], "status": updated["status"], "review_decision": meta["review_decision"]}
 
