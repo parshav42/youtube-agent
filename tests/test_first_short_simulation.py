@@ -257,7 +257,7 @@ def test_first_short_flow_is_isolated_and_requires_explicit_upload_approval(
         retried_upload = client.post(
             f"/api/publishing/{production_id}/upload", headers=headers
         )
-        assert retried_upload.status_code == 200
+        assert retried_upload.status_code == 200, retried_upload.text
         assert retried_upload.json()["status"] == "uploaded_private"
         assert retried_upload.json()["video_id"] == "mock-youtube-video-id"
         assert submitted_bodies[-1]["status"]["privacyStatus"] == "private"
