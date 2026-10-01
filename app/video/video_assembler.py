@@ -51,6 +51,8 @@ class VideoAssembler:
         output = Path(output_path)
         if not audio.is_file() or not subtitles.is_file():
             raise VideoAssemblyError("Narration audio and generated subtitles must exist before rendering.")
+        if output.exists() or output.is_symlink():
+            raise VideoAssemblyError("Video output already exists; refusing to overwrite it.")
         output.parent.mkdir(parents=True, exist_ok=True)
         audio_info = probe_media(audio, self.ffprobe)
         audio_stream = next(
@@ -72,7 +74,7 @@ class VideoAssembler:
         input_durations = [
             input_timeline_duration * scene.duration_seconds / weight_sum for scene in scenes
         ]
-        arguments: list[str] = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y"]
+        arguments: list[str] = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-n"]
         for asset, duration in zip(visual_assets, input_durations, strict=True):
             arguments.extend(
                 ["-loop", "1", "-framerate", str(FRAME_RATE), "-t", f"{duration:.6f}", "-i", asset["path"]]

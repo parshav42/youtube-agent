@@ -17,6 +17,7 @@ from app.schemas.script_schema import ProductionMetadata, ScriptRequest
 from app.video.production_service import ProductionService
 from app.video.subtitle_engine import generate_srt
 from app.video.tts_engine import ElevenLabsTTSProvider, TTSError, build_tts_provider
+from app.video.video_assembler import VideoAssembler, VideoAssemblyError
 from app.video.visual_asset_manager import LicensedLocalAssetManager, VisualAssetError
 
 
@@ -164,6 +165,31 @@ def test_visual_asset_manager_requires_license_provenance(tmp_path) -> None:
         assert "source, license, and rights_holder" in str(error)
     else:
         raise AssertionError("Visuals without license provenance must be rejected.")
+
+
+def test_video_assembler_refuses_to_overwrite_existing_output(tmp_path) -> None:
+    scene = MockScriptGenerator().generate(ScriptRequest(topic="discipline")).scenes[0]
+    asset_path = tmp_path / "scene.png"
+    audio_path = tmp_path / "audio.wav"
+    subtitle_path = tmp_path / "captions.srt"
+    output_path = tmp_path / "final.mp4"
+    asset_path.write_bytes(b"synthetic image placeholder")
+    audio_path.write_bytes(b"synthetic audio placeholder")
+    subtitle_path.write_text("", encoding="utf-8")
+    output_path.write_bytes(b"preserve this existing output")
+    assembler = VideoAssembler()
+    assembler.ensure_available = lambda: None
+
+    with pytest.raises(VideoAssemblyError, match="refusing to overwrite"):
+        assembler.assemble(
+            [scene],
+            [{"scene_number": scene.scene_number, "path": str(asset_path)}],
+            audio_path,
+            subtitle_path,
+            output_path,
+        )
+
+    assert output_path.read_bytes() == b"preserve this existing output"
 
 
 def test_langgraph_routes_video_production_and_resume_inputs(tmp_path) -> None:
