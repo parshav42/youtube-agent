@@ -1,14 +1,48 @@
 """Offline release QA and authenticated local production review checks."""
 
+import sqlite3
+
 import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
+from fastapi.testclient import TestClient
 
 from app.api import ProductionReviewDecision, create_app
 from app.agents.script_agent import MockScriptGenerator
 from app.database.db import create_production, get_production_by_id, save_script, update_production
 from app.schemas.script_schema import ScriptRequest
 from app.video.quality import run_video_quality_assurance
+
+
+def _create_audio_review_fixture(database, production_id, audio_status="needs_review"):
+    output = database.parent / production_id
+    output.mkdir()
+    (output / "final.mp4").write_bytes(b"synthetic review fixture")
+    metadata = {
+        "audio_qa": {"technical_status": audio_status, "findings": ["Synthetic audio finding."]},
+        "video_qa": {"technical_status": "passed", "findings": []},
+    }
+    create_production(production_id, 1, "fixture", output, metadata, database)
+    update_production(production_id, "needs_review", metadata, database_path=database)
+    return metadata
+
+
+@pytest.fixture
+def audio_review_api(tmp_path, monkeypatch):
+    database = tmp_path / "audio-review.sqlite3"
+    _create_audio_review_fixture(database, "audio-review-production")
+    monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "audio-review-test-token")
+    monkeypatch.setenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false")
+    with TestClient(create_app(database)) as client:
+        yield client, database
+
+
+def _audio_review_headers():
+    return {"Authorization": "Bearer audio-review-test-token"}
+
+
+def _audio_review_body(*, confirm=True):
+    return {"confirm_review": confirm, "reviewer": "Audio reviewer"}
 
 
 def test_video_qa_missing_and_invalid_media_fail_closed(tmp_path):
@@ -225,3 +259,141 @@ def test_rejected_audio_review_cannot_be_approved_for_production(tmp_path):
     stored = get_production_by_id("audio-rejected", database)
     assert stored["status"] == "rejected"
     assert stored["metadata"]["audio_review_decision"]["decision"] == "reject"
+
+
+def test_audio_review_api_requires_authentication(audio_review_api):
+    client, _ = audio_review_api
+
+    response = client.post(
+        "/api/productions/audio-review-production/audio-review/approve",
+        json=_audio_review_body(),
+    )
+
+    assert response.status_code == 401
+    assert "audio-review-test-token" not in response.text
+
+
+def test_audio_review_rejects_missing_confirmation(audio_review_api):
+    client, database = audio_review_api
+
+    response = client.post(
+        "/api/productions/audio-review-production/audio-review/approve",
+        headers=_audio_review_headers(),
+        json=_audio_review_body(confirm=False),
+    )
+
+    assert response.status_code == 400
+    assert get_production_by_id("audio-review-production", database)["metadata"].get(
+        "audio_review_decision"
+    ) is None
+
+
+def test_audio_approval_records_a_separate_decision(audio_review_api):
+    client, database = audio_review_api
+
+    response = client.post(
+        "/api/productions/audio-review-production/audio-review/approve",
+        headers=_audio_review_headers(),
+        json=_audio_review_body(),
+    )
+
+    assert response.status_code == 200
+    decision = response.json()["audio_review_decision"]
+    assert decision["decision"] == "approve"
+    assert decision["reviewer"] == "Audio reviewer"
+    assert decision["confirmed"] is True
+    assert decision["reviewed_at"]
+    stored = get_production_by_id("audio-review-production", database)
+    assert stored["status"] == "needs_review"
+    assert stored["metadata"]["audio_qa"]["technical_status"] == "needs_review"
+    assert "review_decision" not in stored["metadata"]
+
+
+def test_audio_rejection_remains_rejected(audio_review_api):
+    client, database = audio_review_api
+
+    response = client.post(
+        "/api/productions/audio-review-production/audio-review/reject",
+        headers=_audio_review_headers(),
+        json=_audio_review_body(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"
+    stored = get_production_by_id("audio-review-production", database)
+    assert stored["status"] == "rejected"
+    assert stored["metadata"]["audio_review_decision"]["decision"] == "reject"
+
+
+def test_repeated_audio_review_decision_is_blocked(audio_review_api):
+    client, _ = audio_review_api
+    url = "/api/productions/audio-review-production/audio-review/approve"
+
+    assert client.post(url, headers=_audio_review_headers(), json=_audio_review_body()).status_code == 200
+    repeated = client.post(
+        "/api/productions/audio-review-production/audio-review/reject",
+        headers=_audio_review_headers(),
+        json=_audio_review_body(),
+    )
+
+    assert repeated.status_code == 409
+
+
+def test_failed_audio_qa_cannot_be_overridden(audio_review_api):
+    client, database = audio_review_api
+    _create_audio_review_fixture(database, "failed-audio-production", "failed")
+
+    response = client.post(
+        "/api/productions/failed-audio-production/audio-review/approve",
+        headers=_audio_review_headers(),
+        json=_audio_review_body(),
+    )
+
+    assert response.status_code == 409
+    stored = get_production_by_id("failed-audio-production", database)
+    assert stored["metadata"]["audio_qa"]["technical_status"] == "failed"
+    assert "audio_review_decision" not in stored["metadata"]
+
+
+def test_audio_approval_does_not_create_production_approval(audio_review_api):
+    client, database = audio_review_api
+
+    response = client.post(
+        "/api/productions/audio-review-production/audio-review/approve",
+        headers=_audio_review_headers(),
+        json=_audio_review_body(),
+    )
+
+    assert response.status_code == 200
+    production = get_production_by_id("audio-review-production", database)
+    assert production["status"] == "needs_review"
+    assert "review_decision" not in production["metadata"]
+
+
+def test_audio_approval_does_not_create_youtube_upload(audio_review_api):
+    client, database = audio_review_api
+
+    response = client.post(
+        "/api/productions/audio-review-production/audio-review/approve",
+        headers=_audio_review_headers(),
+        json=_audio_review_body(),
+    )
+
+    assert response.status_code == 200
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM youtube_uploads").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM publishing_approvals").fetchone()[0] == 0
+
+
+def test_invalid_or_revoked_authentication_is_rejected_safely(audio_review_api, monkeypatch):
+    client, _ = audio_review_api
+    monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "replacement-test-token")
+
+    response = client.get(
+        "/api/productions/audio-review-production/review",
+        headers=_audio_review_headers(),
+    )
+
+    assert response.status_code == 401
+    assert "audio-review-test-token" not in response.text
+    assert "replacement-test-token" not in response.text

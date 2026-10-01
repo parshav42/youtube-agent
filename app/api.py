@@ -166,6 +166,7 @@ def create_app(
             "title": (meta.get("youtube_metadata") or {}).get("title"),
             "description": (meta.get("youtube_metadata") or {}).get("description"),
             "audio_qa": meta.get("audio_qa"), "video_qa": meta.get("video_qa"),
+            "audio_review_decision": meta.get("audio_review_decision"),
             "findings": [*(meta.get("audio_qa") or {}).get("findings", []), *(meta.get("video_qa") or {}).get("findings", [])],
             "video_url": f"/api/productions/{production_id}/video",
         }
