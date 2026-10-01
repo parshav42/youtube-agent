@@ -2,6 +2,7 @@
 
 import base64
 import json
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,7 @@ import pytest
 
 from app.agents.quality_agent import evaluate_script
 from app.agents.script_agent import MockScriptGenerator
+from app.api import create_app
 from app.database.db import get_production_by_id, review_script, save_script
 from app.graph.workflow import build_workflow
 from app.schemas.script_schema import ProductionMetadata, ScriptRequest
@@ -20,6 +22,8 @@ from app.video.subtitle_engine import generate_srt
 from app.video.tts_engine import EdgeTTSProvider, ElevenLabsTTSProvider, TTSError, build_tts_provider
 from app.video.video_assembler import VideoAssembler, VideoAssemblyError
 from app.video.visual_asset_manager import LicensedLocalAssetManager, VisualAssetError
+from app.youtube.publisher import YouTubePublishError, YouTubePublisher
+from app.youtube.repository import initialize_youtube_database
 
 
 class HFMetadataFixture:
@@ -273,9 +277,14 @@ def test_tts_provider_refuses_existing_output_without_calling_service(
     assert output_path.read_bytes() == b"preserve this audio"
 
 
-def test_production_failure_persists_audio_and_resume_renders_playable_mp4(tmp_path) -> None:
+def test_production_failure_persists_audio_and_resume_renders_playable_mp4(tmp_path, monkeypatch) -> None:
     database_path = tmp_path / "production.sqlite3"
-    script_id = make_approved_script(database_path)
+    monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "temporary-review-token")
+    monkeypatch.setenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false")
+    script = MockScriptGenerator().generate(ScriptRequest(topic="discipline"))
+    evaluation = evaluate_script(script)
+    script_record = save_script(script, evaluation=evaluation, database_path=database_path)
+    script_id = script_record["id"]
     library = tmp_path / "licensed-assets"
     output_root = tmp_path / "productions"
     tts = ToneTTSFixture()
@@ -287,6 +296,11 @@ def test_production_failure_persists_audio_and_resume_renders_playable_mp4(tmp_p
         asset_manager=LicensedLocalAssetManager(library),
     )
 
+    with pytest.raises(ValueError, match="explicit human approval"):
+        service.produce_script_record(script_id)
+    assert not output_root.exists()
+    review_script(script_id, "approved", "temporary-reviewer", database_path)
+
     failed = service.produce_script_record(script_id)
 
     assert failed["status"] == "failed"
@@ -296,7 +310,7 @@ def test_production_failure_persists_audio_and_resume_renders_playable_mp4(tmp_p
 
     completed = service.resume(failed["id"])
 
-    assert completed["status"] == "completed"
+    assert completed["status"] == "needs_review"
     assert tts.calls == 1
     video = completed["metadata"]["video"]
     assert Path(video["path"]).is_file()
@@ -307,7 +321,79 @@ def test_production_failure_persists_audio_and_resume_renders_playable_mp4(tmp_p
     assert abs(video["duration_seconds"] - completed["metadata"]["audio"]["duration_seconds"]) < 0.15
     assert completed["metadata"]["subtitles"]["timing_method"].startswith("approximate")
     assert len(completed["metadata"]["visual_assets"]) == 5
-    assert get_production_by_id(failed["id"], database_path)["status"] == "completed"
+    assert completed["metadata"]["audio_qa"]["technical_status"] == "needs_review"
+    assert completed["metadata"]["video_qa"]["technical_status"] == "passed"
+    assert get_production_by_id(failed["id"], database_path)["status"] == "needs_review"
+
+    application = create_app(database_path)
+    route = next(route for route in application.routes if getattr(route, "path", None) == "/api/productions/{production_id}/review")
+    detail = route.endpoint(failed["id"])
+    assert detail["status"] == "needs_review"
+    assert detail["title"] == "Bas Ek Page: A Discipline Story"
+    assert detail["description"]
+    assert detail["audio_qa"]["technical_status"] == "needs_review"
+    assert detail["video_qa"]["technical_status"] == "passed"
+    assert detail["script"]["narration"] == script.narration
+    assert not {"access_token", "refresh_token", "client_secret"}.intersection(detail)
+    require_admin = route.dependant.dependencies[0].call
+    from fastapi import HTTPException
+    from fastapi.security import HTTPAuthorizationCredentials
+    with pytest.raises(HTTPException) as unauthorized:
+        require_admin(credentials=None)
+    assert unauthorized.value.status_code == 401
+    assert require_admin(credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials="temporary-review-token")) is None
+    script_route = next(route for route in application.routes if getattr(route, "path", None) == "/api/scripts/{script_id}/review")
+    assert script_route.endpoint(script_id)["script"] == script.model_dump(mode="json")
+
+    video_route = next(route for route in application.routes if getattr(route, "path", None) == "/api/productions/{production_id}/video")
+    preview = video_route.endpoint(failed["id"])
+    assert preview.media_type == "video/mp4"
+    assert Path(preview.path).read_bytes() == Path(video["path"]).read_bytes()
+    page_route = next(route for route in application.routes if getattr(route, "path", None) == "/production-review")
+    page = page_route.endpoint()
+    assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
+    review_html = Path(page.path).read_text(encoding="utf-8")
+    review_js = (Path(__file__).resolve().parents[1] / "app" / "static" / "production-review.js").read_text(encoding="utf-8")
+    assert "Final video review" in review_html
+    assert ".textContent=value" in review_js
+    assert "/upload" not in review_html + review_js
+    with pytest.raises(YouTubePublishError, match="Only completed productions"):
+        YouTubePublisher(database_path).request_review(failed["id"])
+    initialize_youtube_database(database_path)
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert connection.execute("SELECT COUNT(*) FROM youtube_uploads").fetchone()[0] == 0
+
+
+def test_audio_qa_failure_blocks_visual_acquisition_and_rendering(tmp_path, monkeypatch) -> None:
+    from app.audio.quality import run_audio_quality_assurance
+    import app.video.production_service as production_module
+
+    database_path = tmp_path / "audio-qa-block.sqlite3"
+    script_id = make_approved_script(database_path)
+    tts = ToneTTSFixture()
+    missing_audio_report = run_audio_quality_assurance(tmp_path / "missing-audio.mp3")
+    monkeypatch.setattr(
+        production_module, "run_audio_quality_assurance", lambda *args, **kwargs: missing_audio_report
+    )
+
+    class AssetManager:
+        def acquire(self, *args, **kwargs):
+            pytest.fail("Visual acquisition must not run after failed audio QA.")
+
+    service = ProductionService(
+        database_path,
+        tmp_path / "productions",
+        llm_provider=HFMetadataFixture(),
+        tts_provider=tts,
+        asset_manager=AssetManager(),
+    )
+    result = service.produce_script_record(script_id)
+
+    assert result["status"] == "failed"
+    assert result["metadata"]["audio_qa"]["technical_status"] == "failed"
+    assert "Audio QA did not pass" in result["error"]
+    assert not (Path(result["output_dir"]) / "final.mp4").exists()
 
 
 def test_missing_hf_configuration_is_persisted_without_fake_audio(tmp_path, monkeypatch) -> None:
