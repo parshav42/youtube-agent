@@ -45,6 +45,7 @@ class ApprovalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     confirm_approval: bool
+    channel_id: str | None = Field(default=None, max_length=64)
     visibility: str | None = Field(default=None, pattern="^(private|unlisted|public)$")
     confirm_public: bool = False
 
@@ -370,6 +371,7 @@ def create_app(
         try:
             approval = resolved_publisher.approve(
                 production_id,
+                channel_id=body.channel_id,
                 visibility=body.visibility,
                 confirm_public=body.confirm_public,
             )
@@ -467,6 +469,7 @@ def _approval_response(approval: dict[str, Any]) -> dict[str, Any]:
         "state": approval["state"],
         "visibility": approval["visibility"],
         "approved_at": approval["approved_at"],
+        "approved_channel_id": approval.get("approved_channel_id"),
         "metadata": approval["metadata"],
         "error": approval["error"],
     }
