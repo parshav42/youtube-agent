@@ -145,7 +145,7 @@ class ProductionService:
                 audio.path, target_duration_seconds=script.target_duration_seconds
             )
             metadata["audio_qa"] = _serialize_audio_qa(audio_qa)
-            if audio_qa.technical_status != "passed":
+            if audio_qa.technical_status == "failed":
                 raise RuntimeError(
                     "Audio QA did not pass; video rendering is blocked ("
                     + "; ".join(audio_qa.findings)
@@ -192,8 +192,9 @@ class ProductionService:
                     + ")."
                 )
             self._update(production_id, "rendering", metadata)
-            self._write_metadata(output_dir, production_id, "completed", metadata, None)
-            return self._update(production_id, "completed", metadata)
+            status = "needs_review" if audio_qa.technical_status == "needs_review" else "completed"
+            self._write_metadata(output_dir, production_id, status, metadata, None)
+            return self._update(production_id, status, metadata)
         except Exception as error:
             message = _safe_error(error)
             try:
