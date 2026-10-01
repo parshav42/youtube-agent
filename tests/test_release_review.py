@@ -152,6 +152,48 @@ def test_needs_review_audio_requires_separate_recorded_human_decision(tmp_path):
     assert duplicate_audio_decision.value.status_code == 409
 
 
+@pytest.mark.parametrize(
+    "audio_review_decision",
+    [
+        None,
+        {"decision": "approve", "reviewer": "Audio reviewer", "confirmed": True},
+        {"decision": "approve", "reviewer": " ", "confirmed": True, "reviewed_at": "2026-10-02T00:00:00+00:00"},
+        {"decision": "approve", "reviewer": "Audio reviewer", "confirmed": False, "reviewed_at": "2026-10-02T00:00:00+00:00"},
+        {"decision": "approve", "reviewer": "Audio reviewer", "confirmed": True, "reviewed_at": "not-a-timestamp"},
+        {"decision": "reject", "reviewer": "Audio reviewer", "confirmed": True, "reviewed_at": "2026-10-02T00:00:00+00:00"},
+    ],
+)
+def test_malformed_audio_review_decisions_do_not_authorize_production(tmp_path, audio_review_decision):
+    database = tmp_path / "malformed-audio-review.sqlite3"
+    output = tmp_path / "production"
+    output.mkdir()
+    metadata = {
+        "audio_qa": {"technical_status": "needs_review", "findings": []},
+        "video_qa": {"technical_status": "passed", "findings": []},
+        "audio_review_decision": audio_review_decision,
+    }
+    create_production("malformed-audio-review", 1, "fixture", output, metadata, database)
+    update_production("malformed-audio-review", "needs_review", metadata, database_path=database)
+    application = create_app(database)
+    route = next(
+        route
+        for route in application.routes
+        if getattr(route, "path", None) == "/api/productions/{production_id}/review/{decision}"
+    )
+
+    with pytest.raises(HTTPException) as blocked:
+        route.endpoint(
+            "malformed-audio-review",
+            "approve",
+            ProductionReviewDecision(confirm_review=True, reviewer="Production reviewer"),
+        )
+
+    assert blocked.value.status_code == 409
+    stored = get_production_by_id("malformed-audio-review", database)
+    assert stored["status"] == "needs_review"
+    assert stored["metadata"] == metadata
+
+
 def test_rejected_audio_review_cannot_be_approved_for_production(tmp_path):
     database = tmp_path / "audio-rejection.sqlite3"
     output = tmp_path / "production"

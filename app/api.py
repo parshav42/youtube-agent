@@ -234,6 +234,8 @@ def create_app(
         record = get_production_by_id(production_id, resolved_path)
         if record is None:
             raise HTTPException(status_code=404, detail="Production was not found.")
+        if not isinstance(record["metadata"], dict):
+            raise HTTPException(status_code=409, detail="Production metadata is invalid.")
         metadata = dict(record["metadata"])
         audio_qa = metadata.get("audio_qa")
         if record["status"] != "needs_review" or not isinstance(audio_qa, dict) or audio_qa.get("technical_status") != "needs_review":
