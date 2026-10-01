@@ -1,9 +1,4 @@
-"""Isolated route and asset checks for the local review dashboards.
-
-The installed Starlette TestClient deadlocks before application startup in this
-environment, including for a bare FastAPI app. These tests call route handlers
-directly and inspect the FileResponse/static assets without a test-server thread.
-"""
+"""Isolated route and asset checks for the local review dashboards."""
 
 from pathlib import Path
 
@@ -55,4 +50,29 @@ def test_production_review_page_is_local_and_cannot_upload(tmp_path) -> None:
     assert "Audio QA" in html and "Video QA" in html
     assert "Approve for publishing workflow" in html
     assert "/upload" not in html + script
-    assert ".textContent=value" in script
+    assert ".textContent" in script
+
+
+def test_audio_review_dashboard_renders_findings_safely_and_separates_decisions() -> None:
+    static = Path(__file__).resolve().parents[1] / "app" / "static"
+    html = (static / "production-review.html").read_text(encoding="utf-8")
+    script = (static / "production-review.js").read_text(encoding="utf-8")
+
+    assert 'id="audio-review"' in html
+    assert 'id="audio-status"' in html
+    assert 'id="audio-findings"' in html
+    assert 'id="audio-review-required"' in html
+    assert 'id="audio-decision-metadata"' in html
+    assert 'id="audio-approve"' in html and 'id="audio-reject"' in html
+    assert 'audioStatus === "needs_review" && !decision' in script
+    assert 'data.status === "needs_review"' in script
+    assert "item.textContent = String(finding)" in script
+    assert "innerHTML" not in script and "localStorage" not in script
+    assert "confirm_review: true, reviewer" in script
+    assert "This does not approve production or publish." in script
+    assert "response.status === 401" in script
+    assert "response.status === 404" in script
+    assert "response.status === 409" in script
+    assert "response.status >= 500" in script
+    assert 'id="signout"' in html and 'id="refresh-review"' in html
+    assert 'rel="stylesheet" href="/review-assets/review.css"' in html

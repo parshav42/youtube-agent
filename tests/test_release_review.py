@@ -14,7 +14,7 @@ from app.schemas.script_schema import ScriptRequest
 from app.video.quality import run_video_quality_assurance
 
 
-def _create_audio_review_fixture(database, production_id, audio_status="needs_review"):
+def _create_audio_review_fixture(database, production_id, audio_status="needs_review", script_id=1):
     output = database.parent / production_id
     output.mkdir()
     (output / "final.mp4").write_bytes(b"synthetic review fixture")
@@ -22,7 +22,7 @@ def _create_audio_review_fixture(database, production_id, audio_status="needs_re
         "audio_qa": {"technical_status": audio_status, "findings": ["Synthetic audio finding."]},
         "video_qa": {"technical_status": "passed", "findings": []},
     }
-    create_production(production_id, 1, "fixture", output, metadata, database)
+    create_production(production_id, script_id, "fixture", output, metadata, database)
     update_production(production_id, "needs_review", metadata, database_path=database)
     return metadata
 
@@ -30,7 +30,11 @@ def _create_audio_review_fixture(database, production_id, audio_status="needs_re
 @pytest.fixture
 def audio_review_api(tmp_path, monkeypatch):
     database = tmp_path / "audio-review.sqlite3"
-    _create_audio_review_fixture(database, "audio-review-production")
+    script = MockScriptGenerator().generate(ScriptRequest(topic="audio review fixture"))
+    script_record = save_script(script, database_path=database)
+    _create_audio_review_fixture(
+        database, "audio-review-production", script_id=script_record["id"]
+    )
     monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "audio-review-test-token")
     monkeypatch.setenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false")
     with TestClient(create_app(database)) as client:
@@ -279,10 +283,10 @@ def test_audio_review_rejects_missing_confirmation(audio_review_api):
     response = client.post(
         "/api/productions/audio-review-production/audio-review/approve",
         headers=_audio_review_headers(),
-        json=_audio_review_body(confirm=False),
+        json={"reviewer": "Audio reviewer"},
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 422
     assert get_production_by_id("audio-review-production", database)["metadata"].get(
         "audio_review_decision"
     ) is None
@@ -303,6 +307,14 @@ def test_audio_approval_records_a_separate_decision(audio_review_api):
     assert decision["reviewer"] == "Audio reviewer"
     assert decision["confirmed"] is True
     assert decision["reviewed_at"]
+    refreshed = client.get(
+        "/api/productions/audio-review-production/review",
+        headers=_audio_review_headers(),
+    )
+    assert refreshed.status_code == 200
+    assert refreshed.json()["audio_review_decision"] == decision
+    assert refreshed.json()["audio_qa"]["technical_status"] == "needs_review"
+    assert refreshed.json()["audio_qa"]["findings"] == ["Synthetic audio finding."]
     stored = get_production_by_id("audio-review-production", database)
     assert stored["status"] == "needs_review"
     assert stored["metadata"]["audio_qa"]["technical_status"] == "needs_review"
