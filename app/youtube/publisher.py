@@ -17,6 +17,7 @@ from app.youtube.repository import (
     claim_upload,
     get_approval,
     get_upload,
+    record_channel_identity_audit,
     request_review,
     update_upload_progress,
 )
@@ -102,6 +103,7 @@ class YouTubePublisher:
         self,
         production_id: str,
         *,
+        channel_id: str | None = None,
         visibility: str | None = None,
         confirm_public: bool = False,
     ) -> dict[str, Any]:
@@ -119,12 +121,58 @@ class YouTubePublisher:
                 "Public visibility requires confirm_public=true in the explicit approval request."
             )
         metadata = PublishingMetadata.model_validate(approval["metadata"])
-        return approve_production(
+        approved_channel_id = channel_id.strip() if isinstance(channel_id, str) else ""
+        if not approved_channel_id:
+            record_channel_identity_audit(
+                production_id,
+                phase="approval",
+                outcome="rejected",
+                reason="approved_channel_missing",
+                database_path=self.database_path,
+            )
+            raise YouTubePublishError("An explicitly approved YouTube channel ID is required.")
+        try:
+            credentials = self.oauth.authorized_credentials()
+            service = self.api_builder(credentials)
+            authenticated_channel_id = self._authenticated_channel_id(service)
+        except Exception as error:
+            record_channel_identity_audit(
+                production_id,
+                phase="approval",
+                outcome="rejected",
+                reason="authenticated_channel_unavailable",
+                approved_channel_id=approved_channel_id,
+                database_path=self.database_path,
+            )
+            raise YouTubePublishError("The authenticated YouTube channel could not be verified.") from error
+        if not authenticated_channel_id:
+            record_channel_identity_audit(
+                production_id,
+                phase="approval",
+                outcome="rejected",
+                reason="authenticated_channel_missing",
+                approved_channel_id=approved_channel_id,
+                database_path=self.database_path,
+            )
+            raise YouTubePublishError("The authenticated YouTube channel could not be verified.")
+        saved_approval = approve_production(
             production_id,
             selected_visibility,
             metadata.model_dump(mode="json"),
             self.database_path,
+            approved_channel_id=approved_channel_id,
+            authenticated_channel_id_at_approval=authenticated_channel_id,
         )
+        record_channel_identity_audit(
+            production_id,
+            phase="approval",
+            outcome="verified",
+            reason="approval_identity_recorded",
+            approved_channel_id=approved_channel_id,
+            authenticated_channel_id=authenticated_channel_id,
+            database_path=self.database_path,
+        )
+        return saved_approval
 
     def upload(self, production_id: str) -> dict[str, Any]:
         """Start or resume the one authorized resumable upload for a production."""
@@ -151,6 +199,8 @@ class YouTubePublisher:
         except Exception as error:
             raise YouTubePublishError(str(error)) from error
         try:
+            service = self.api_builder(credentials)
+            self._verify_channel_identity(production_id, approval, service)
             production = self._load_completed_production(production_id)
             video_path = self._video_path(production)
             upload = claim_upload(production_id, self.database_path)
@@ -162,7 +212,6 @@ class YouTubePublisher:
         request: Any | None = None
         upload_started = False
         try:
-            service = self.api_builder(credentials)
             description = self._description_with_reference(metadata.description, production_id)
             body = {
                 "snippet": {
@@ -398,6 +447,63 @@ class YouTubePublisher:
                 "The final video differs from the artifact recorded at production review."
             )
         return production
+
+    @staticmethod
+    def _authenticated_channel_id(service: Any) -> str | None:
+        response = service.channels().list(part="id", mine=True, maxResults=1).execute(
+            num_retries=0
+        )
+        channels = response.get("items", []) if isinstance(response, dict) else []
+        if not channels or not isinstance(channels[0], dict):
+            return None
+        channel_id = channels[0].get("id")
+        return channel_id.strip() if isinstance(channel_id, str) and channel_id.strip() else None
+
+    def _verify_channel_identity(
+        self,
+        production_id: str,
+        approval: dict[str, Any],
+        service: Any,
+    ) -> None:
+        approved_channel_id = approval.get("approved_channel_id")
+        approval_account_id = approval.get("authenticated_channel_id_at_approval")
+
+        def reject(reason: str, authenticated_channel_id: str | None = None) -> None:
+            record_channel_identity_audit(
+                production_id,
+                phase="upload",
+                outcome="rejected",
+                reason=reason,
+                approved_channel_id=approved_channel_id,
+                authenticated_channel_id=authenticated_channel_id,
+                database_path=self.database_path,
+            )
+            raise YouTubePublishError("Upload rejected: YouTube channel identity verification failed.")
+
+        if not isinstance(approved_channel_id, str) or not approved_channel_id.strip():
+            reject("approved_channel_missing")
+        if not isinstance(approval_account_id, str) or not approval_account_id.strip():
+            reject("approval_account_missing")
+        try:
+            authenticated_channel_id = self._authenticated_channel_id(service)
+        except Exception as error:
+            reject("authenticated_channel_unavailable")
+            raise AssertionError("unreachable") from error
+        if not authenticated_channel_id:
+            reject("authenticated_channel_missing")
+        if authenticated_channel_id != approval_account_id:
+            reject("authenticated_account_changed", authenticated_channel_id)
+        if authenticated_channel_id != approved_channel_id:
+            reject("approved_channel_mismatch", authenticated_channel_id)
+        record_channel_identity_audit(
+            production_id,
+            phase="upload",
+            outcome="verified",
+            reason="channel_identity_match",
+            approved_channel_id=approved_channel_id,
+            authenticated_channel_id=authenticated_channel_id,
+            database_path=self.database_path,
+        )
 
     def _load_metadata(self, production: dict[str, Any]) -> PublishingMetadata:
         artifact_path = Path(production["output_dir"]) / "metadata.json"
