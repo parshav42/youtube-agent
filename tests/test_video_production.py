@@ -3,6 +3,7 @@
 import base64
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,7 @@ from app.graph.workflow import build_workflow
 from app.schemas.script_schema import ProductionMetadata, ScriptRequest
 from app.video.production_service import ProductionService
 from app.video.subtitle_engine import generate_srt
-from app.video.tts_engine import ElevenLabsTTSProvider, TTSError, build_tts_provider
+from app.video.tts_engine import EdgeTTSProvider, ElevenLabsTTSProvider, TTSError, build_tts_provider
 from app.video.video_assembler import VideoAssembler, VideoAssemblyError
 from app.video.visual_asset_manager import LicensedLocalAssetManager, VisualAssetError
 
@@ -167,29 +168,28 @@ def test_visual_asset_manager_requires_license_provenance(tmp_path) -> None:
         raise AssertionError("Visuals without license provenance must be rejected.")
 
 
-def test_video_assembler_refuses_to_overwrite_existing_output(tmp_path) -> None:
-    scene = MockScriptGenerator().generate(ScriptRequest(topic="discipline")).scenes[0]
-    asset_path = tmp_path / "scene.png"
-    audio_path = tmp_path / "audio.wav"
+def test_video_assembler_refuses_existing_output_before_rendering(tmp_path) -> None:
+    script = MockScriptGenerator().generate(ScriptRequest(topic="discipline"))
+    assets = []
+    for scene in script.scenes:
+        asset_path = tmp_path / f"scene_{scene.scene_number}.png"
+        asset_path.write_bytes(b"synthetic fixture")
+        assets.append({"scene_number": scene.scene_number, "path": str(asset_path)})
+    audio_path = tmp_path / "narration.wav"
     subtitle_path = tmp_path / "captions.srt"
     output_path = tmp_path / "final.mp4"
-    asset_path.write_bytes(b"synthetic image placeholder")
-    audio_path.write_bytes(b"synthetic audio placeholder")
-    subtitle_path.write_text("", encoding="utf-8")
-    output_path.write_bytes(b"preserve this existing output")
+    audio_path.write_bytes(b"synthetic fixture")
+    subtitle_path.write_text("synthetic fixture", encoding="utf-8")
+    output_path.write_bytes(b"preserve this file")
     assembler = VideoAssembler()
     assembler.ensure_available = lambda: None
 
     with pytest.raises(VideoAssemblyError, match="refusing to overwrite"):
         assembler.assemble(
-            [scene],
-            [{"scene_number": scene.scene_number, "path": str(asset_path)}],
-            audio_path,
-            subtitle_path,
-            output_path,
+            script.scenes, assets, audio_path, subtitle_path, output_path
         )
 
-    assert output_path.read_bytes() == b"preserve this existing output"
+    assert output_path.read_bytes() == b"preserve this file"
 
 
 def test_langgraph_routes_video_production_and_resume_inputs(tmp_path) -> None:
@@ -242,6 +242,35 @@ def test_elevenlabs_uses_credentials_and_actual_word_alignment(tmp_path, monkeyp
     assert "with-timestamps" in client.call[0][0]
     assert client.call[1]["headers"]["xi-api-key"] == "test-secret"
     assert subtitles.timing_method.startswith("provider character-level")
+
+
+@pytest.mark.parametrize("provider_name", ["edge", "elevenlabs"])
+def test_tts_provider_refuses_existing_output_without_calling_service(
+    provider_name, tmp_path, monkeypatch
+) -> None:
+    script = MockScriptGenerator().generate(ScriptRequest(topic="discipline"))
+    output_path = tmp_path / "existing.mp3"
+    output_path.write_bytes(b"preserve this audio")
+
+    class EdgeTTSModule:
+        class Communicate:
+            def __init__(self, *args, **kwargs):
+                pytest.fail("Edge TTS must not be called for an existing output.")
+
+    class HTTPClient:
+        def post(self, *args, **kwargs):
+            pytest.fail("ElevenLabs must not be called for an existing output.")
+
+    if provider_name == "edge":
+        monkeypatch.setitem(sys.modules, "edge_tts", EdgeTTSModule)
+        provider = EdgeTTSProvider()
+    else:
+        provider = ElevenLabsTTSProvider("fixture-key", "fixture-voice", http_client=HTTPClient())
+
+    with pytest.raises(TTSError, match="refusing to overwrite"):
+        provider.synthesize(script, output_path)
+
+    assert output_path.read_bytes() == b"preserve this audio"
 
 
 def test_production_failure_persists_audio_and_resume_renders_playable_mp4(tmp_path) -> None:

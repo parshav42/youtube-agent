@@ -18,6 +18,7 @@ from app.database.db import (
     ScriptNotFoundError,
     ScriptReviewError,
     get_script_by_id,
+    get_production_by_id,
     get_scripts_needing_review,
     review_script,
 )
@@ -117,6 +118,13 @@ def create_app(
             },
         )
 
+    @application.get("/production-review", include_in_schema=False)
+    def production_review_page() -> FileResponse:
+        return FileResponse(static_directory / "production-review.html", headers={
+            "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+            "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+        })
+
     def require_admin(
         credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     ) -> None:
@@ -126,6 +134,36 @@ def create_app(
         supplied = credentials.credentials if credentials else ""
         if not hmac.compare_digest(supplied, expected):
             raise HTTPException(status_code=401, detail="Administrative authorization required.")
+
+    @application.get("/api/productions/{production_id}/review", dependencies=[Depends(require_admin)])
+    def production_review(production_id: str) -> dict[str, Any]:
+        production = get_production_by_id(production_id, resolved_path)
+        if production is None:
+            raise HTTPException(status_code=404, detail="Production was not found.")
+        script = get_script_by_id(production["script_id"], resolved_path)
+        if script is None:
+            raise HTTPException(status_code=404, detail="Production script was not found.")
+        meta = production["metadata"]
+        return {
+            "id": production["id"], "status": production["status"],
+            "error": production["error"], "script": script["script"],
+            "title": (meta.get("youtube_metadata") or {}).get("title"),
+            "description": (meta.get("youtube_metadata") or {}).get("description"),
+            "audio_qa": meta.get("audio_qa"), "video_qa": meta.get("video_qa"),
+            "findings": [*(meta.get("audio_qa") or {}).get("findings", []), *(meta.get("video_qa") or {}).get("findings", [])],
+            "video_url": f"/api/productions/{production_id}/video",
+        }
+
+    @application.get("/api/productions/{production_id}/video", dependencies=[Depends(require_admin)])
+    def production_review_video(production_id: str) -> FileResponse:
+        production = get_production_by_id(production_id, resolved_path)
+        if production is None:
+            raise HTTPException(status_code=404, detail="Production was not found.")
+        output_root = Path(production["output_dir"]).resolve()
+        video = (output_root / "final.mp4").resolve()
+        if video.parent != output_root or not video.is_file():
+            raise HTTPException(status_code=404, detail="Final video is unavailable.")
+        return FileResponse(video, media_type="video/mp4", headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
 
     @application.get("/api/scripts/review", dependencies=[Depends(require_admin)])
     def scripts_awaiting_review(

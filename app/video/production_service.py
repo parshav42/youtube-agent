@@ -7,6 +7,7 @@ from typing import Any
 
 from app.agents.metadata_agent import generate_metadata
 from app.config import get_database_path, get_production_output_path
+from app.audio.quality import run_audio_quality_assurance
 from app.database.db import (
     create_production,
     get_production_by_id,
@@ -18,6 +19,7 @@ from app.schemas.script_schema import MotivationalScript, ScriptEvaluation
 from app.video.subtitle_engine import generate_srt
 from app.video.tts_engine import build_tts_provider, validate_audio
 from app.video.video_assembler import VideoAssembler
+from app.video.quality import run_video_quality_assurance
 from app.video.visual_asset_manager import LicensedLocalAssetManager
 
 
@@ -139,6 +141,16 @@ class ProductionService:
                 "word_timings": audio.word_timings,
                 "alignment_source": audio.alignment_source,
             }
+            audio_qa = run_audio_quality_assurance(
+                audio.path, target_duration_seconds=script.target_duration_seconds
+            )
+            metadata["audio_qa"] = _serialize_audio_qa(audio_qa)
+            if audio_qa.technical_status != "passed":
+                raise RuntimeError(
+                    "Audio QA did not pass; video rendering is blocked ("
+                    + "; ".join(audio_qa.findings)
+                    + ")."
+                )
             self._update(production_id, "generating_audio", metadata)
 
             self._update(production_id, "acquiring_visuals", metadata)
@@ -171,11 +183,19 @@ class ProductionService:
                 output_dir / "final.mp4",
             )
             metadata["video"] = video
+            video_qa = run_video_quality_assurance(video["path"])
+            metadata["video_qa"] = video_qa
+            if video_qa["technical_status"] != "passed":
+                raise RuntimeError(
+                    "Video QA did not pass; production cannot be approved ("
+                    + "; ".join(video_qa["findings"])
+                    + ")."
+                )
             self._update(production_id, "rendering", metadata)
             self._write_metadata(output_dir, production_id, "completed", metadata, None)
             return self._update(production_id, "completed", metadata)
         except Exception as error:
-            message = f"{type(error).__name__}: {error}"
+            message = _safe_error(error)
             try:
                 self._write_metadata(output_dir, production_id, "failed", metadata, message)
             except OSError:
@@ -215,3 +235,22 @@ class ProductionService:
         temporary = output_dir / "metadata.json.tmp"
         temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         temporary.replace(output_dir / "metadata.json")
+
+
+def _serialize_audio_qa(report: Any) -> dict[str, Any]:
+    from dataclasses import asdict
+
+    return asdict(report)
+
+
+def _safe_error(error: Exception) -> str:
+    """Persist concise diagnostics with credential-like values redacted."""
+    import os
+    import re
+
+    message = f"{type(error).__name__}: {error}"
+    for key in ("HF_TOKEN", "ELEVENLABS_API_KEY", "MOTIVATIONOS_ADMIN_TOKEN"):
+        secret = os.getenv(key)
+        if secret:
+            message = message.replace(secret, "[REDACTED]")
+    return re.sub(r"(?i)(token|api[_ -]?key|authorization)(\s*[:=]\s*)[^\s,;]+", r"\1\2[REDACTED]", message)[:3000]

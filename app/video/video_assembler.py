@@ -49,10 +49,10 @@ class VideoAssembler:
         audio = Path(audio_path)
         subtitles = Path(subtitle_path)
         output = Path(output_path)
-        if not audio.is_file() or not subtitles.is_file():
-            raise VideoAssemblyError("Narration audio and generated subtitles must exist before rendering.")
         if output.exists() or output.is_symlink():
             raise VideoAssemblyError("Video output already exists; refusing to overwrite it.")
+        if not audio.is_file() or not subtitles.is_file():
+            raise VideoAssemblyError("Narration audio and generated subtitles must exist before rendering.")
         output.parent.mkdir(parents=True, exist_ok=True)
         audio_info = probe_media(audio, self.ffprobe)
         audio_stream = next(
