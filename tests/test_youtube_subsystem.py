@@ -39,16 +39,24 @@ def make_completed_production(database_path: Path, output_root: Path) -> tuple[s
     video_path = output_root / "final.mp4"
     video_path.write_bytes(b"test-only MP4 fixture")
     create_production(production_id, 1, "Test topic", output_root, database_path=database_path)
-    update_production(
-        production_id,
-        "completed",
-        {"video": {"path": str(video_path)}},
-        database_path=database_path,
-    )
+    review_decision = {
+        "decision": "approve",
+        "reviewer": "test-production-reviewer",
+        "confirmed": True,
+        "reviewed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    production_metadata = {
+        "video": {"path": str(video_path)},
+        "audio_qa": {"technical_status": "passed", "findings": []},
+        "video_qa": {"technical_status": "passed", "findings": []},
+        "review_decision": review_decision,
+    }
+    update_production(production_id, "completed", production_metadata, database_path=database_path)
     artifact = {
         "production_id": production_id,
         "status": "completed",
         "metadata": {
+            **production_metadata,
             "youtube_metadata": {
                 "title": "A Small Step",
                 "description": "A short original test description.",
@@ -355,6 +363,134 @@ def test_publisher_rejects_missing_approval_before_any_api_call(tmp_path) -> Non
         publisher.upload(production_id)
     assert api_calls == []
     assert get_upload(production_id, database_path) is None
+
+
+@pytest.mark.parametrize(
+    "invalid_metadata",
+    [
+        {"review_decision": None},
+        {"review_decision": {"decision": "approve", "confirmed": True}},
+        {"review_decision": {"decision": "approve", "reviewer": "reviewer", "confirmed": True}},
+        {"audio_qa": {"technical_status": "failed"}},
+        {"audio_qa": {"technical_status": "needs_review"}},
+        {"video_qa": {"technical_status": "failed"}},
+        {"video_qa": None},
+        {"audio_qa": None},
+    ],
+)
+def test_publishing_review_rejects_ineligible_production_before_clients(
+    tmp_path, invalid_metadata
+) -> None:
+    database_path = tmp_path / "app.sqlite3"
+    production_id, _ = make_completed_production(database_path, tmp_path / "production")
+    from app.database.db import get_production_by_id
+
+    production = get_production_by_id(production_id, database_path)
+    production["metadata"].update(invalid_metadata)
+    update_production(production_id, "completed", production["metadata"], database_path=database_path)
+    calls = []
+    publisher = YouTubePublisher(
+        database_path,
+        oauth=SimpleNamespace(authorized_credentials=lambda: calls.append("oauth")),
+        api_builder=lambda credentials: calls.append("api"),
+        media_upload_factory=lambda path: calls.append("upload"),
+    )
+
+    with pytest.raises(YouTubePublishError):
+        publisher.request_review(production_id)
+
+    with pytest.raises(YouTubePublishError):
+        publisher.upload(production_id)
+    assert calls == []
+    assert get_upload(production_id, database_path) is None
+
+
+def test_publishing_review_rejects_duplicate_active_record(tmp_path) -> None:
+    database_path = tmp_path / "app.sqlite3"
+    production_id, _ = make_completed_production(database_path, tmp_path / "production")
+    publisher = YouTubePublisher(database_path)
+    publisher.request_review(production_id)
+
+    with pytest.raises(YouTubePublishError, match="already exists"):
+        publisher.request_review(production_id)
+
+    assert get_upload(production_id, database_path)["status"] == "awaiting_review"
+
+
+def test_publishing_review_accepts_separately_reviewed_audio(tmp_path) -> None:
+    database_path = tmp_path / "app.sqlite3"
+    production_id, _ = make_completed_production(database_path, tmp_path / "production")
+    from app.database.db import get_production_by_id
+
+    production = get_production_by_id(production_id, database_path)
+    production["metadata"]["audio_qa"] = {"technical_status": "needs_review", "findings": []}
+    production["metadata"]["audio_review_decision"] = {
+        "decision": "approve",
+        "reviewer": "test-audio-reviewer",
+        "confirmed": True,
+        "reviewed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    update_production(production_id, "completed", production["metadata"], database_path=database_path)
+    publisher = YouTubePublisher(database_path)
+
+    result = publisher.request_review(production_id)
+
+    assert result["approval"]["state"] == "awaiting_review"
+
+
+def test_publishing_rejects_missing_or_ineligible_production_before_clients(tmp_path) -> None:
+    database_path = tmp_path / "app.sqlite3"
+    production_id, _ = make_completed_production(database_path, tmp_path / "production")
+    from app.database.db import get_production_by_id
+
+    production = get_production_by_id(production_id, database_path)
+    calls = []
+    publisher = YouTubePublisher(
+        database_path,
+        oauth=SimpleNamespace(authorized_credentials=lambda: calls.append("oauth")),
+        api_builder=lambda credentials: calls.append("api"),
+        media_upload_factory=lambda path: calls.append("upload"),
+    )
+    update_production(production_id, "needs_review", production["metadata"], database_path=database_path)
+
+    with pytest.raises(YouTubePublishError, match="Only completed"):
+        publisher.request_review(production_id)
+    with pytest.raises(YouTubePublishError, match="not found"):
+        publisher.request_review("missing-production")
+
+    assert calls == []
+    assert get_upload(production_id, database_path) is None
+
+
+def test_upload_rechecks_production_approval_before_any_upload_method(tmp_path) -> None:
+    database_path = tmp_path / "app.sqlite3"
+    production_id, _ = make_completed_production(database_path, tmp_path / "production")
+    calls = []
+
+    class OAuthFixture:
+        def authorized_credentials(self):
+            calls.append("oauth")
+            return object()
+
+    publisher = YouTubePublisher(
+        database_path,
+        oauth=OAuthFixture(),
+        api_builder=lambda credentials: calls.append("api"),
+        media_upload_factory=lambda path: calls.append("upload"),
+        video_validator=lambda path: calls.append("validate"),
+    )
+    publisher.request_review(production_id)
+    publisher.approve(production_id)
+    from app.database.db import get_production_by_id
+
+    production = get_production_by_id(production_id, database_path)
+    production["metadata"].pop("review_decision")
+    update_production(production_id, "completed", production["metadata"], database_path=database_path)
+
+    with pytest.raises(YouTubePublishError, match="production-review approval"):
+        publisher.upload(production_id)
+
+    assert calls == []
 
 
 def test_confirmed_upload_persists_actual_response_and_visibility(tmp_path) -> None:

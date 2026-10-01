@@ -10,6 +10,7 @@ from app.config import get_database_path, get_youtube_visibility
 from app.database.db import get_production_by_id
 from app.schemas.script_schema import ProductionMetadata
 from app.video.video_assembler import validate_video
+from app.video.review_gates import has_recorded_decision, production_qa_allows_approval
 from app.youtube.auth import GoogleOAuthService
 from app.youtube.repository import (
     approve_production,
@@ -78,6 +79,12 @@ class YouTubePublisher:
     ) -> dict[str, Any]:
         """Validate a completed production and create its awaiting-review record."""
         production = self._load_completed_production(production_id)
+        if get_approval(production_id, self.database_path) is not None or get_upload(
+            production_id, self.database_path
+        ) is not None:
+            raise YouTubePublishError(
+                "A publishing review or upload record already exists for this production."
+            )
         metadata = self._load_metadata(production)
         target_visibility = visibility or get_youtube_visibility()
         if target_visibility not in {"private", "unlisted", "public"}:
@@ -102,6 +109,10 @@ class YouTubePublisher:
         approval = get_approval(production_id, self.database_path)
         if approval is None or approval["state"] != "awaiting_review":
             raise YouTubePublishError("Publishing approval is only accepted from awaiting_review.")
+        upload = get_upload(production_id, self.database_path)
+        if upload is None or upload["status"] != "awaiting_review":
+            raise YouTubePublishError("A conflicting or active upload record already exists.")
+        self._load_completed_production(production_id)
         selected_visibility = visibility or approval["visibility"]
         if selected_visibility == "public" and not confirm_public:
             raise YouTubePublishError(
@@ -140,9 +151,13 @@ class YouTubePublisher:
         except Exception as error:
             raise YouTubePublishError(str(error)) from error
         try:
+            production = self._load_completed_production(production_id)
+            video_path = self._video_path(production)
             upload = claim_upload(production_id, self.database_path)
         except ValueError as error:
             raise YouTubePublishError(str(error)) from error
+        except YouTubePublishError:
+            raise
 
         request: Any | None = None
         try:
@@ -351,6 +366,15 @@ class YouTubePublisher:
             raise YouTubePublishError("Production was not found.")
         if production["status"] != "completed":
             raise YouTubePublishError("Only completed productions can be published.")
+        metadata = production.get("metadata")
+        if not isinstance(metadata, dict) or not has_recorded_decision(
+            metadata.get("review_decision"), "approve"
+        ):
+            raise YouTubePublishError(
+                "A confirmed production-review approval with reviewer and timestamp is required."
+            )
+        if not production_qa_allows_approval(metadata):
+            raise YouTubePublishError("Production QA requirements have not been satisfied.")
         return production
 
     def _load_metadata(self, production: dict[str, Any]) -> PublishingMetadata:
