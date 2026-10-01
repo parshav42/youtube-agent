@@ -6,7 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 
 from app.api import ProductionReviewDecision, create_app
 from app.agents.script_agent import MockScriptGenerator
-from app.database.db import create_production, save_script
+from app.database.db import create_production, get_production_by_id, save_script, update_production
 from app.schemas.script_schema import ScriptRequest
 from app.video.quality import run_video_quality_assurance
 
@@ -31,7 +31,7 @@ def test_production_review_auth_and_one_time_approval(tmp_path, monkeypatch):
     (output / "final.mp4").write_bytes(b"synthetic preview")
     metadata = {
         "youtube_metadata": {"title": "Fixture title", "description": "Fixture description"},
-        "audio_qa": {"technical_status": "needs_review", "findings": ["Approximate signal analysis."]},
+        "audio_qa": {"technical_status": "passed", "findings": ["Synthetic fixture passed."]},
         "video_qa": {"technical_status": "passed", "findings": ["Video passed."]},
     }
     create_production("fixture-production", saved["id"], "focus", output, metadata, database)
@@ -73,3 +73,113 @@ def test_production_review_auth_and_one_time_approval(tmp_path, monkeypatch):
     with pytest.raises(HTTPException) as repeated_rejection:
         decision_route.endpoint("fixture-rejected", "reject", body)
     assert repeated_rejection.value.status_code == 409
+
+
+@pytest.mark.parametrize(
+    "audio_qa",
+    [None, {}, {"technical_status": "failed"}, {"technical_status": "needs_review"}, {"technical_status": 1}],
+)
+def test_audio_qa_without_approval_blocks_production_without_mutation(tmp_path, audio_qa):
+    database = tmp_path / "audio-gate.sqlite3"
+    output = tmp_path / "production"
+    output.mkdir()
+    metadata = {
+        "audio_qa": audio_qa,
+        "video_qa": {"technical_status": "passed", "findings": []},
+    }
+    create_production("audio-gate", 1, "fixture", output, metadata, database)
+    update_production("audio-gate", "needs_review", metadata, database_path=database)
+    application = create_app(database)
+    route = next(
+        route
+        for route in application.routes
+        if getattr(route, "path", None) == "/api/productions/{production_id}/review/{decision}"
+    )
+
+    with pytest.raises(HTTPException) as blocked:
+        route.endpoint(
+            "audio-gate",
+            "approve",
+            ProductionReviewDecision(confirm_review=True, reviewer="Audio reviewer"),
+        )
+
+    assert blocked.value.status_code == 409
+    stored = get_production_by_id("audio-gate", database)
+    assert stored["status"] == "needs_review"
+    assert stored["metadata"] == metadata
+
+
+def test_needs_review_audio_requires_separate_recorded_human_decision(tmp_path):
+    database = tmp_path / "audio-human-review.sqlite3"
+    output = tmp_path / "production"
+    output.mkdir()
+    metadata = {
+        "audio_qa": {"technical_status": "needs_review", "findings": ["Approximate analysis."]},
+        "video_qa": {"technical_status": "passed", "findings": []},
+    }
+    create_production("audio-human-review", 1, "fixture", output, metadata, database)
+    update_production("audio-human-review", "needs_review", metadata, database_path=database)
+    application = create_app(database)
+    audio_route = next(
+        route
+        for route in application.routes
+        if getattr(route, "path", None) == "/api/productions/{production_id}/audio-review/{decision}"
+    )
+    production_route = next(
+        route
+        for route in application.routes
+        if getattr(route, "path", None) == "/api/productions/{production_id}/review/{decision}"
+    )
+    body = ProductionReviewDecision(confirm_review=True, reviewer="Audio reviewer")
+
+    with pytest.raises(HTTPException) as unreviewed:
+        production_route.endpoint("audio-human-review", "approve", body)
+    assert unreviewed.value.status_code == 409
+    assert get_production_by_id("audio-human-review", database)["metadata"] == metadata
+
+    audio_decision = audio_route.endpoint("audio-human-review", "approve", body)
+    assert audio_decision["status"] == "needs_review"
+    assert audio_decision["audio_review_decision"]["decision"] == "approve"
+    assert audio_decision["audio_review_decision"]["reviewer"] == "Audio reviewer"
+    assert audio_decision["audio_review_decision"]["reviewed_at"]
+    assert get_production_by_id("audio-human-review", database)["metadata"]["audio_qa"]["technical_status"] == "needs_review"
+
+    approved = production_route.endpoint("audio-human-review", "approve", body)
+    assert approved["status"] == "completed"
+    assert approved["review_decision"]["reviewed_at"]
+    with pytest.raises(HTTPException) as duplicate_audio_decision:
+        audio_route.endpoint("audio-human-review", "reject", body)
+    assert duplicate_audio_decision.value.status_code == 409
+
+
+def test_rejected_audio_review_cannot_be_approved_for_production(tmp_path):
+    database = tmp_path / "audio-rejection.sqlite3"
+    output = tmp_path / "production"
+    output.mkdir()
+    metadata = {
+        "audio_qa": {"technical_status": "needs_review", "findings": []},
+        "video_qa": {"technical_status": "passed", "findings": []},
+    }
+    create_production("audio-rejected", 1, "fixture", output, metadata, database)
+    update_production("audio-rejected", "needs_review", metadata, database_path=database)
+    application = create_app(database)
+    audio_route = next(
+        route
+        for route in application.routes
+        if getattr(route, "path", None) == "/api/productions/{production_id}/audio-review/{decision}"
+    )
+    production_route = next(
+        route
+        for route in application.routes
+        if getattr(route, "path", None) == "/api/productions/{production_id}/review/{decision}"
+    )
+    body = ProductionReviewDecision(confirm_review=True, reviewer="Audio reviewer")
+
+    rejected = audio_route.endpoint("audio-rejected", "reject", body)
+    assert rejected["status"] == "rejected"
+    with pytest.raises(HTTPException) as blocked:
+        production_route.endpoint("audio-rejected", "approve", body)
+    assert blocked.value.status_code == 409
+    stored = get_production_by_id("audio-rejected", database)
+    assert stored["status"] == "rejected"
+    assert stored["metadata"]["audio_review_decision"]["decision"] == "reject"

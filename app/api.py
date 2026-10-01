@@ -4,7 +4,7 @@ import hmac
 import json
 import os
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,7 @@ from app.youtube.analytics import YouTubeAnalyticsError, YouTubeAnalyticsService
 from app.youtube.auth import GoogleOAuthService, YouTubeAuthError
 from app.youtube.publisher import YouTubePublishError, YouTubePublisher
 from app.youtube.repository import initialize_youtube_database
+from app.video.review_gates import production_qa_allows_approval
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -194,9 +195,14 @@ def create_app(
         if record["metadata"].get("review_decision"):
             raise HTTPException(status_code=409, detail="A review decision has already been recorded.")
         meta = dict(record["metadata"])
-        if decision == "approve" and (meta.get("video_qa", {}).get("technical_status") != "passed" or meta.get("audio_qa", {}).get("technical_status") == "failed"):
+        if decision == "approve" and not production_qa_allows_approval(meta):
             raise HTTPException(status_code=409, detail="Production QA blocks approval.")
-        meta["review_decision"] = {"decision": decision, "reviewer": body.reviewer, "confirmed": True}
+        meta["review_decision"] = {
+            "decision": decision,
+            "reviewer": body.reviewer,
+            "confirmed": True,
+            "reviewed_at": datetime.now(timezone.utc).isoformat(),
+        }
         status = "completed" if decision == "approve" else "rejected"
         if decision == "approve":
             artifact_path = Path(record["output_dir"]).resolve() / "metadata.json"
@@ -213,6 +219,41 @@ def create_app(
                 raise HTTPException(status_code=500, detail="Production review could not be persisted.") from error
         updated = update_production(production_id, status, meta, database_path=resolved_path)
         return {"production_id": updated["id"], "status": updated["status"], "review_decision": meta["review_decision"]}
+
+    @application.post(
+        "/api/productions/{production_id}/audio-review/{decision}",
+        dependencies=[Depends(require_admin)],
+    )
+    def record_audio_review(
+        production_id: str, decision: str, body: ProductionReviewDecision
+    ) -> dict[str, Any]:
+        if decision not in {"approve", "reject"}:
+            raise HTTPException(status_code=404, detail="Audio review decision was not found.")
+        if not body.confirm_review:
+            raise HTTPException(status_code=400, detail="Explicit confirm_review=true is required.")
+        record = get_production_by_id(production_id, resolved_path)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Production was not found.")
+        metadata = dict(record["metadata"])
+        audio_qa = metadata.get("audio_qa")
+        if record["status"] != "needs_review" or not isinstance(audio_qa, dict) or audio_qa.get("technical_status") != "needs_review":
+            raise HTTPException(status_code=409, detail="Audio is not awaiting human review.")
+        if metadata.get("audio_review_decision"):
+            raise HTTPException(status_code=409, detail="An audio review decision has already been recorded.")
+        audio_review = {
+            "decision": decision,
+            "reviewer": body.reviewer,
+            "confirmed": True,
+            "reviewed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        metadata["audio_review_decision"] = audio_review
+        status = "needs_review" if decision == "approve" else "rejected"
+        updated = update_production(production_id, status, metadata, database_path=resolved_path)
+        return {
+            "production_id": updated["id"],
+            "status": updated["status"],
+            "audio_review_decision": audio_review,
+        }
 
     @application.get("/api/scripts/review", dependencies=[Depends(require_admin)])
     def scripts_awaiting_review(
