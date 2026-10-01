@@ -1,0 +1,103 @@
+{
+  "topic": "Consistency during exam season",
+  "language": "Natural Hindi-English Hinglish",
+  "target_duration_seconds": 35,
+  "title_candidates": [
+    "Consistency is Key",
+    "Steady Wins the Race",
+    "Study Smart, Stay Consistent"
+  ],
+  "opening_hook": "Hey everyone, it's time to ace those exams!",
+  "narration": "Hey everyone, it's time to ace those exams! 📚 In the heart of exam season, staying consistent can make all the difference. Meet Priya, a student who faced a big challenge. Hook\n\nIn the heart of exam season, staying consistent can make all the difference. Meet Priya, a student who faced a big challenge. Problem\n\nPriya was overwhelmed with her studies and started to lose focus. She felt like giving up. Conflict\n\nPriya was overwhelmed with her studies and started to lose focus. She felt like giving up. Turning point\n\nBut then, her teacher reminded her to stay consistent and not to rush. Priya decided to take it one day at a time. Resolution\n\nWith renewed focus, Priya managed to ace her exams. She proved to herself that consistency is key. Closing message\n\nSo, stay consistent, and you’ll ace those exams too! 🌟",
+  "story_beats": [
+    "Hook: In the heart of exam season, staying consistent can make all the difference. Meet Priya, a student who faced a big challenge.",
+    "Problem: Priya was overwhelmed with her studies and started to lose focus. She felt like giving up.",
+    "Conflict: Priya was overwhelmed with her studies and started to lose focus. She felt like giving up.",
+    "Turning point: But then, her teacher reminded her to stay consistent and not to rush. Priya decided to take it one day at a time.",
+    "Resolution: With renewed focus, Priya managed to ace her exams. She proved to herself that consistency is key.",
+    "Closing message: So, stay consistent, and you’ll ace those exams too! 🌟"
+  ],
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration_seconds": 5,
+      "narration": "Hey everyone, it's time to ace those exams! 📚 In the heart of exam season, staying consistent can make all the difference. ",
+      "visual_description": "Vertical 9:16, A lively classroom with students engrossed in their studies, a clock ticking in the background, and a serene study area in the corner.",
+      "caption": "In the heart of exam season, staying consistent can make all the difference.",
+      "transition": "Cut to",
+      "audio_direction": "Narrator in Hinglish, enthusiastic tone."
+    },
+    {
+      "scene_number": 2,
+      "duration_seconds": 5,
+      "narration": "Meet Priya, a student who faced a big challenge. Hook\n\nIn the heart of exam season, staying consistent can make all the difference. ",
+      "visual_description": "Vertical 9:16, Priya sitting alone in a quiet corner, surrounded by piles of books, looking stressed and overwhelmed.",
+      "caption": "Priya was overwhelmed with her studies and started to lose focus.",
+      "transition": "Fade to",
+      "audio_direction": "Narrator in Hinglish, concerned tone."
+    },
+    {
+      "scene_number": 3,
+      "duration_seconds": 5,
+      "narration": "Meet Priya, a student who faced a big challenge. Problem\n\nPriya was overwhelmed with her studies and started to lose focus. ",
+      "visual_description": "Vertical 9:16, Her teacher walking by, noticing her state, and stopping to talk, with Priya looking up in surprise.",
+      "caption": "But then, her teacher reminded her to stay consistent and not to rush.",
+      "transition": "Cut to",
+      "audio_direction": "Teacher in English, reassuring tone."
+    },
+    {
+      "scene_number": 4,
+      "duration_seconds": 5,
+      "narration": "She felt like giving up. Conflict\n\nPriya was overwhelmed with her studies and started to lose focus. ",
+      "visual_description": "Vertical 9:16, Priya taking deep breaths and organizing her study materials, looking more focused and determined.",
+      "caption": "Priya decided to take it one day at a time.",
+      "transition": "Cut to",
+      "audio_direction": "Narrator in Hinglish, encouraging tone."
+    },
+    {
+      "scene_number": 5,
+      "duration_seconds": 5,
+      "narration": "She felt like giving up. Turning point\n\nBut then, her teacher reminded her to stay consistent and not to rush. ",
+      "visual_description": "Vertical 9:16, Priya sitting in a classroom with a big smile, holding a stack of papers with good grades, surrounded by classmates.",
+      "caption": "With renewed focus, Priya managed to ace her exams.",
+      "transition": "Fade to",
+      "audio_direction": "Narrator in Hinglish, excited tone."
+    },
+    {
+      "scene_number": 6,
+      "duration_seconds": 5,
+      "narration": "Priya decided to take it one day at a time. Resolution\n\nWith renewed focus, Priya managed to ace her exams. ",
+      "visual_description": "Vertical 9:16, Priya celebrating with her friends, holding up her exam results, with a joyful and relieved expression.",
+      "caption": "She proved to herself that consistency is key.",
+      "transition": "Cut to",
+      "audio_direction": "Narrator in Hinglish, proud tone."
+    },
+    {
+      "scene_number": 7,
+      "duration_seconds": 5,
+      "narration": "She proved to herself that consistency is key. Closing message\n\nSo, stay consistent, and you’ll ace those exams too! 🌟",
+      "visual_description": "Vertical 9:16, Priya and her friends raising their hands in the air, cheering, with a backdrop of colorful confetti and balloons.",
+      "caption": "So, stay consistent, and you’ll ace those exams too! 🌟",
+      "transition": "End scene",
+      "audio_direction": "Narrator in Hinglish, motivating tone."
+    }
+  ],
+  "closing_message": "So, stay consistent, and you’ll ace those exams too! 🌟",
+  "description": "A motivational story about the importance of consistency during exam season. Follow Priya's journey and learn how staying consistent can lead to success.",
+  "hashtags": [
+    "#Consistency",
+    "#ExamSeason",
+    "#StayConsistent",
+    "#StudyHard",
+    "#AceExams"
+  ],
+  "quality_score": 3.75,
+  "revision_notes": [
+    "The language is consistent and flows well in Hinglish.",
+    "The narrative is clear and coherent, maintaining a clear message throughout.",
+    "The story is original and does not appear to copy any existing content.",
+    "The motivational message is clear and directly supports the theme of the story.",
+    "There are no unsupported factual assertions in the script.",
+    "Revision 2: Address the language consistency check.; Address the unsupported factual assertions check.; The narrative is consistent and coherent, maintaining a clear message throughout.; The story is original and does not appear to copy any existing content.; The motivational message is clear and directly supports the theme of the story.; There are no unsupported factual assertions in the script.; The language is natural and flows well in Hinglish."
+  ]
+}

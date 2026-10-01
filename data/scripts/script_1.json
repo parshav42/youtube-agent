@@ -1,0 +1,78 @@
+{
+  "topic": "discipline",
+  "language": "Hinglish",
+  "target_duration_seconds": 35,
+  "title_candidates": [
+    "The Promise After Snooze",
+    "Bas Ek Page",
+    "One Small Choice"
+  ],
+  "opening_hook": "Subah alarm baja, Aarav ne snooze dabaya. Kal se padhunga, usne khud se kaha.",
+  "narration": "Subah alarm baja, Aarav ne snooze dabaya. Kal se padhunga, usne khud se kaha. Exam paas tha, kitaab saamne thi, par pehla page kholna mushkil lag raha tha. Phone phir chamka. Woh scroll karne hi wala tha, phir apna timetable dekha. Is baar phone side rakha aur sirf ek page padha. Das minute beet gaye. Page khatam hua. Sab kuch solve nahi hua, par usne kal ka wait bhi nahi kiya. Discipline shuru hota hai aaj ke ek chhote promise se.",
+  "story_beats": [
+    "Hook: Subah alarm baja, Aarav ne snooze dabaya. Kal se padhunga, usne khud se kaha.",
+    "Problem: Exam paas tha, kitaab saamne thi, par pehla page kholna mushkil lag raha tha. ",
+    "Conflict: Phone phir chamka. Woh scroll karne hi wala tha, phir apna timetable dekha. ",
+    "Turning point: Is baar phone side rakha aur sirf ek page padha. Das minute beet gaye. ",
+    "Resolution: Page khatam hua. Sab kuch solve nahi hua, par usne kal ka wait bhi nahi kiya. Discipline shuru hota hai aaj ke ek chhote promise se.",
+    "Closing message: Aaj khud se kiya ek chhota promise nibhao."
+  ],
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration_seconds": 7,
+      "narration": "Subah alarm baja, Aarav ne snooze dabaya. Kal se padhunga, usne khud se kaha. ",
+      "visual_description": "Vertical 9:16, Close-up of a student silencing an alarm in a dim room.",
+      "caption": "Alarm baja; kal se padhunga.",
+      "transition": "Fade in",
+      "audio_direction": "Low room tone; a single muted alarm note."
+    },
+    {
+      "scene_number": 2,
+      "duration_seconds": 7,
+      "narration": "Exam paas tha, kitaab saamne thi, par pehla page kholna mushkil lag raha tha. ",
+      "visual_description": "Vertical 9:16, Study desk, unopened book, morning light across the page.",
+      "caption": "Pehla page kholna mushkil tha.",
+      "transition": "Slow dissolve",
+      "audio_direction": "Sparse piano begins under natural room tone."
+    },
+    {
+      "scene_number": 3,
+      "duration_seconds": 7,
+      "narration": "Phone phir chamka. Woh scroll karne hi wala tha, phir apna timetable dekha. ",
+      "visual_description": "Vertical 9:16, Phone lighting a quiet room beside a waiting notebook.",
+      "caption": "Phone ya timetable: ek chhoti choice.",
+      "transition": "Match cut",
+      "audio_direction": "A subtle pulse adds tension."
+    },
+    {
+      "scene_number": 4,
+      "duration_seconds": 7,
+      "narration": "Is baar phone side rakha aur sirf ek page padha. Das minute beet gaye. ",
+      "visual_description": "Vertical 9:16, Hand places phone face down and opens one book page.",
+      "caption": "Phone side par. Ek page.",
+      "transition": "Gentle push",
+      "audio_direction": "Warm piano chord as the page turns."
+    },
+    {
+      "scene_number": 5,
+      "duration_seconds": 7,
+      "narration": "Page khatam hua. Sab kuch solve nahi hua, par usne kal ka wait bhi nahi kiya. Discipline shuru hota hai aaj ke ek chhote promise se.",
+      "visual_description": "Vertical 9:16, Student returns to the desk as soft sunrise fills the frame.",
+      "caption": "Kal ka wait nahi; ek chhota promise.",
+      "transition": "Fade to black",
+      "audio_direction": "Resolve to a restrained piano note and quiet room tone."
+    }
+  ],
+  "closing_message": "Aaj khud se kiya ek chhota promise nibhao.",
+  "description": "An original Hinglish story about discipline.",
+  "hashtags": [
+    "#Discipline",
+    "#Consistency",
+    "#Hinglish"
+  ],
+  "quality_score": 10.0,
+  "revision_notes": [
+    "Explicit deterministic test fixture; not a live model response."
+  ]
+}

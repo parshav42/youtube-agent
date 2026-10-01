@@ -1,0 +1,258 @@
+"""Local, access-controlled HTTP API for YouTube operations."""
+
+import hmac
+import os
+from contextlib import asynccontextmanager
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.config import get_database_path
+from app.reporting.daily_report import DailyReportService
+from app.reporting.scheduler import build_scheduler, run_scheduled_report
+from app.youtube.analytics import YouTubeAnalyticsError, YouTubeAnalyticsService
+from app.youtube.auth import GoogleOAuthService, YouTubeAuthError
+from app.youtube.publisher import YouTubePublishError, YouTubePublisher
+from app.youtube.repository import initialize_youtube_database
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+class ReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    visibility: str | None = Field(default=None, pattern="^(private|unlisted|public)$")
+
+
+class ApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm_approval: bool
+    visibility: str | None = Field(default=None, pattern="^(private|unlisted|public)$")
+    confirm_public: bool = False
+
+
+def create_app(
+    database_path: str | Path | None = None,
+    *,
+    publisher: YouTubePublisher | None = None,
+    analytics: YouTubeAnalyticsService | None = None,
+    report_service: DailyReportService | None = None,
+    oauth: GoogleOAuthService | None = None,
+) -> FastAPI:
+    resolved_path = Path(database_path) if database_path is not None else get_database_path()
+    resolved_oauth = oauth or GoogleOAuthService(str(resolved_path))
+    resolved_publisher = publisher or YouTubePublisher(resolved_path, oauth=resolved_oauth)
+    resolved_analytics = analytics or YouTubeAnalyticsService(resolved_path, oauth=resolved_oauth)
+    resolved_reports = report_service or DailyReportService(
+        resolved_path, analytics=resolved_analytics
+    )
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI):
+        initialize_youtube_database(resolved_path)
+        scheduler = None
+        if os.getenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false").strip().lower() in {
+            "1", "true", "yes"
+        }:
+            scheduler = build_scheduler(str(resolved_path))
+            scheduler.start()
+        application.state.scheduler = scheduler
+        try:
+            yield
+        finally:
+            if scheduler and scheduler.running:
+                scheduler.shutdown(wait=False)
+
+    application = FastAPI(title="MotivationOS YouTube Operations", lifespan=lifespan)
+    application.state.database_path = str(resolved_path)
+    application.state.oauth = resolved_oauth
+    application.state.publisher = resolved_publisher
+    application.state.analytics = resolved_analytics
+    application.state.reports = resolved_reports
+
+    def require_admin(
+        credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    ) -> None:
+        expected = os.getenv("MOTIVATIONOS_ADMIN_TOKEN", "")
+        if not expected:
+            raise HTTPException(status_code=503, detail="Administrative API is not configured.")
+        supplied = credentials.credentials if credentials else ""
+        if not hmac.compare_digest(supplied, expected):
+            raise HTTPException(status_code=401, detail="Administrative authorization required.")
+
+    @application.get("/api/youtube/status", dependencies=[Depends(require_admin)])
+    def youtube_status() -> dict[str, Any]:
+        return resolved_oauth.status()
+
+    @application.get("/api/youtube/auth/start", dependencies=[Depends(require_admin)])
+    def youtube_auth_start() -> dict[str, str]:
+        try:
+            return resolved_oauth.start_authorization()
+        except YouTubeAuthError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+
+    @application.get("/api/youtube/auth/callback")
+    def youtube_auth_callback(
+        state: str | None = Query(default=None),
+        code: str | None = Query(default=None),
+        error: str | None = Query(default=None),
+    ) -> dict[str, str]:
+        try:
+            resolved_oauth.complete_authorization(state=state, code=code, provider_error=error)
+        except YouTubeAuthError as auth_error:
+            raise HTTPException(status_code=400, detail=str(auth_error)) from auth_error
+        return {"status": "connected", "message": "Google OAuth completed. Tokens are stored encrypted."}
+
+    @application.get("/api/youtube/videos", dependencies=[Depends(require_admin)])
+    def youtube_videos(max_results: int = Query(default=50, ge=1, le=100)) -> dict[str, Any]:
+        try:
+            return resolved_publisher.list_channel_videos(max_results)
+        except (YouTubePublishError, YouTubeAuthError) as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+
+    @application.post(
+        "/api/publishing/{production_id}/review", dependencies=[Depends(require_admin)]
+    )
+    def publishing_review(production_id: str, body: ReviewRequest) -> dict[str, Any]:
+        try:
+            return resolved_publisher.request_review(production_id, body.visibility)
+        except YouTubePublishError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @application.post(
+        "/api/publishing/{production_id}/approve", dependencies=[Depends(require_admin)]
+    )
+    def publishing_approve(production_id: str, body: ApprovalRequest) -> dict[str, Any]:
+        if not body.confirm_approval:
+            raise HTTPException(status_code=400, detail="Explicit confirm_approval=true is required.")
+        try:
+            approval = resolved_publisher.approve(
+                production_id,
+                visibility=body.visibility,
+                confirm_public=body.confirm_public,
+            )
+            return _approval_response(approval)
+        except YouTubePublishError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @application.post(
+        "/api/publishing/{production_id}/upload", dependencies=[Depends(require_admin)]
+    )
+    def publishing_upload(production_id: str) -> dict[str, Any]:
+        try:
+            return _upload_response(resolved_publisher.upload(production_id))
+        except YouTubePublishError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @application.post(
+        "/api/publishing/{production_id}/cancel", dependencies=[Depends(require_admin)]
+    )
+    def publishing_cancel(production_id: str) -> dict[str, Any]:
+        try:
+            return _approval_response(resolved_publisher.cancel(production_id))
+        except YouTubePublishError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @application.post(
+        "/api/publishing/{production_id}/reconcile", dependencies=[Depends(require_admin)]
+    )
+    def publishing_reconcile(production_id: str) -> dict[str, Any]:
+        try:
+            return resolved_publisher.reconcile(production_id)
+        except YouTubePublishError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @application.get(
+        "/api/publishing/{production_id}/status", dependencies=[Depends(require_admin)]
+    )
+    def publishing_status(production_id: str) -> dict[str, Any]:
+        return _upload_status_response(resolved_publisher.status(production_id))
+
+    @application.get("/api/analytics/channel", dependencies=[Depends(require_admin)])
+    def channel_analytics(
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return resolved_analytics.channel_report(
+                start_date.isoformat() if start_date else None,
+                end_date.isoformat() if end_date else None,
+            )
+        except YouTubeAuthError as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+        except YouTubeAnalyticsError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @application.get(
+        "/api/analytics/videos/{video_id}", dependencies=[Depends(require_admin)]
+    )
+    def video_analytics(
+        video_id: str,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return resolved_analytics.video_report(
+                video_id,
+                start_date.isoformat() if start_date else None,
+                end_date.isoformat() if end_date else None,
+            )
+        except YouTubeAuthError as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+        except YouTubeAnalyticsError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @application.post("/api/reports/daily", dependencies=[Depends(require_admin)])
+    def daily_report(report_date: date | None = None) -> dict[str, Any]:
+        return resolved_reports.run(report_date)
+
+    @application.post("/api/scheduler/run-daily", dependencies=[Depends(require_admin)])
+    def run_daily_scheduler_job() -> dict[str, Any]:
+        return run_scheduled_report(
+            database_path=str(resolved_path), report_service=resolved_reports
+        )
+
+    return application
+
+
+def _approval_response(approval: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "production_id": approval["production_id"],
+        "state": approval["state"],
+        "visibility": approval["visibility"],
+        "approved_at": approval["approved_at"],
+        "metadata": approval["metadata"],
+        "error": approval["error"],
+    }
+
+
+def _upload_response(upload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "production_id": upload["production_id"],
+        "video_id": upload["video_id"],
+        "status": upload["status"],
+        "visibility": upload["visibility"],
+        "uploaded_at": upload["uploaded_at"],
+        "error": upload["error"],
+    }
+
+
+def _upload_status_response(status: dict[str, Any]) -> dict[str, Any]:
+    upload = status.get("upload")
+    return {
+        "production_id": status["production_id"],
+        "approval": _approval_response(status["approval"]) if status.get("approval") else None,
+        "upload": _upload_response(upload) if upload else None,
+    }
+
+
+app = create_app()
