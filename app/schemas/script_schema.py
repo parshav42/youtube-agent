@@ -193,6 +193,26 @@ class ScriptEvaluation(BaseModel):
     unsupported_guarantees: bool
     feedback: list[str] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def validate_decision_consistency(self) -> "ScriptEvaluation":
+        checks = (
+            self.language_consistency,
+            self.story_coherence,
+            self.originality_safeguards,
+            self.duration_feasibility,
+            self.repetition,
+            self.motivational_message,
+            self.scene_completeness,
+            self.caption_scene_alignment,
+            self.structural_labels_absent,
+            self.unsupported_factual_assertions,
+            self.unsupported_guarantees,
+        )
+        expected_passed = self.quality_score >= self.threshold and all(checks)
+        if self.passed != expected_passed:
+            raise ValueError("passed must match the quality threshold and all evaluation checks.")
+        return self
+
 
 class StoryBeatPlan(BaseModel):
     """Structured story-beat output from a configured LLM provider."""

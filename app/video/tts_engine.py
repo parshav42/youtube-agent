@@ -36,28 +36,26 @@ class EdgeTTSProvider:
         self.timeout_seconds = timeout_seconds
 
     def synthesize(self, script: MotivationalScript, output_path: str | Path) -> AudioMetadata:
-        output = self._generate_text(script.narration, output_path, refuse_existing=False)
+        output = self._generate_text(script.narration, output_path)
         return validate_audio(output, self.provider_name, self.voice)
 
     def generate(self, approved_script_text: str, output_path: str | Path) -> Path:
         """Generate audio from approved narration text for the audio-provider protocol."""
-        return self._generate_text(approved_script_text, output_path, refuse_existing=True)
+        return self._generate_text(approved_script_text, output_path)
 
     def _generate_text(
         self,
         text: str,
         output_path: str | Path,
-        *,
-        refuse_existing: bool,
     ) -> Path:
         if not isinstance(text, str) or not text.strip():
             raise TTSError("Approved script narration is empty.")
+        output = Path(output_path)
+        if output.exists() or output.is_symlink():
+            raise TTSError("Audio output already exists; refusing to overwrite it.")
         try:
             import edge_tts
 
-            output = Path(output_path)
-            if refuse_existing and output.exists():
-                raise TTSError("Audio output already exists; refusing to overwrite it.")
             output.parent.mkdir(parents=True, exist_ok=True)
             communicator = edge_tts.Communicate(
                 text,
@@ -70,6 +68,8 @@ class EdgeTTSProvider:
             raise TTSError(
                 f"TTS request timed out after {self.timeout_seconds}s; check network access and retry."
             ) from error
+        except TTSError:
+            raise
         except Exception as error:
             message = str(error)
             lowered = message.lower()
@@ -109,10 +109,12 @@ class ElevenLabsTTSProvider:
     def synthesize(self, script: MotivationalScript, output_path: str | Path) -> AudioMetadata:
         if not script.narration.strip():
             raise TTSError("Approved script narration is empty.")
+        output = Path(output_path)
+        if output.exists() or output.is_symlink():
+            raise TTSError("Audio output already exists; refusing to overwrite it.")
         try:
             import httpx
 
-            output = Path(output_path)
             output.parent.mkdir(parents=True, exist_ok=True)
             client = self._http_client
             if client is None:
