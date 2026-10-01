@@ -118,7 +118,15 @@ class YouTubePublisher:
     def upload(self, production_id: str) -> dict[str, Any]:
         """Start or resume the one authorized resumable upload for a production."""
         approval = get_approval(production_id, self.database_path)
-        if approval is None or approval["state"] != "approved":
+        upload = get_upload(production_id, self.database_path)
+        resumable_retry = (
+            approval is not None
+            and approval["state"] in {"failed", "uploading"}
+            and upload is not None
+            and upload["status"] == approval["state"]
+            and bool(upload.get("resumable_uri"))
+        )
+        if approval is None or (approval["state"] != "approved" and not resumable_retry):
             raise YouTubePublishError("Upload rejected: explicit publishing approval is required.")
         production = self._load_completed_production(production_id)
         metadata = PublishingMetadata.model_validate(approval["metadata"])

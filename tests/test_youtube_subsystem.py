@@ -410,6 +410,69 @@ def test_confirmed_upload_persists_actual_response_and_visibility(tmp_path) -> N
     assert get_upload(production_id, database_path)["resumable_uri"] != "https://upload.example/session/test"
 
 
+def test_failed_upload_resumes_saved_session_without_duplicate_insert(tmp_path) -> None:
+    database_path = tmp_path / "app.sqlite3"
+    production_id, _ = make_completed_production(database_path, tmp_path / "production")
+    cipher = Fernet(Fernet.generate_key())
+
+    class OAuthFixture:
+        def authorized_credentials(self):
+            return object()
+
+        def encrypt_persistent_secret(self, value):
+            return cipher.encrypt(value.encode()).decode()
+
+        def decrypt_persistent_secret(self, value):
+            return cipher.decrypt(value.encode()).decode()
+
+    class UploadRequest:
+        def __init__(self, fail: bool) -> None:
+            self.fail = fail
+            self.resumable_uri = None
+
+        def next_chunk(self, num_retries):
+            if self.fail:
+                self.resumable_uri = "https://upload.example/session/retry-fixture"
+                raise RuntimeError("simulated interruption")
+            assert self.resumable_uri == "https://upload.example/session/retry-fixture"
+            return SimpleNamespace(progress=lambda: 1.0), {
+                "id": "youtube-resumed-id",
+                "status": {"privacyStatus": "private"},
+            }
+
+    requests = [UploadRequest(fail=True), UploadRequest(fail=False)]
+    inserts = []
+
+    class Videos:
+        def insert(self, **kwargs):
+            inserts.append(kwargs)
+            return requests.pop(0)
+
+    publisher = YouTubePublisher(
+        database_path,
+        oauth=OAuthFixture(),
+        api_builder=lambda credentials: SimpleNamespace(videos=lambda: Videos()),
+        media_upload_factory=lambda path: object(),
+        video_validator=lambda path: {"valid": True},
+    )
+    publisher.request_review(production_id)
+    publisher.approve(production_id)
+
+    with pytest.raises(YouTubePublishError, match="network or API error"):
+        publisher.upload(production_id)
+    failed = get_upload(production_id, database_path)
+    assert failed["status"] == "failed"
+    assert failed["resumable_uri"]
+    assert "retry-fixture" not in failed["resumable_uri"]
+
+    uploaded = publisher.upload(production_id)
+
+    assert uploaded["status"] == "uploaded_private"
+    assert uploaded["video_id"] == "youtube-resumed-id"
+    assert uploaded["attempt_count"] == 2
+    assert len(inserts) == 2
+
+
 def test_ambiguous_upload_reconciles_by_production_reference(tmp_path) -> None:
     database_path = tmp_path / "app.sqlite3"
     production_id, _ = make_completed_production(database_path, tmp_path / "production")

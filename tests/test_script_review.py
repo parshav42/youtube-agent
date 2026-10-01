@@ -27,7 +27,9 @@ def _save_script(database_path, *, passed: bool = True):
     script = MockScriptGenerator().generate(ScriptRequest(topic="discipline"))
     evaluation = evaluate_script(script)
     if not passed:
-        evaluation = evaluation.model_copy(update={"passed": False})
+        evaluation = evaluation.model_copy(
+            update={"passed": False, "language_consistency": False}
+        )
     return save_script(script, evaluation=evaluation, database_path=database_path)
 
 
@@ -52,6 +54,19 @@ def test_failed_quality_evaluation_cannot_be_approved(tmp_path) -> None:
     record = _save_script(database_path, passed=False)
 
     with pytest.raises(ScriptReviewError, match="must pass quality evaluation"):
+        review_script(record["id"], "approved", "reviewer-test", database_path)
+
+    assert get_script_by_id(record["id"], database_path)["status"] == "needs_review"
+
+
+def test_inconsistent_passing_score_cannot_be_approved(tmp_path) -> None:
+    database_path = tmp_path / "scripts.sqlite3"
+    script = MockScriptGenerator().generate(ScriptRequest(topic="discipline"))
+    evaluation = evaluate_script(script).model_dump(mode="json")
+    evaluation.update({"quality_score": 0, "passed": True})
+    record = save_script(script, evaluation=evaluation, database_path=database_path)
+
+    with pytest.raises(ScriptReviewError, match="valid passing quality evaluation"):
         review_script(record["id"], "approved", "reviewer-test", database_path)
 
     assert get_script_by_id(record["id"], database_path)["status"] == "needs_review"
