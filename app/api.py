@@ -21,6 +21,7 @@ from app.database.db import (
     get_production_by_id,
     get_scripts_needing_review,
     review_script,
+    update_production,
 )
 from app.reporting.daily_report import DailyReportService
 from app.reporting.scheduler import build_scheduler, run_scheduled_report
@@ -49,6 +50,19 @@ class ApprovalRequest(BaseModel):
 class ScriptReviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    confirm_review: bool
+    reviewer: str = Field(min_length=1, max_length=100)
+
+    @field_validator("reviewer", mode="before")
+    @classmethod
+    def require_reviewer_name(cls, value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("Reviewer must not be empty.")
+        return value.strip()
+
+
+class ProductionReviewDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     confirm_review: bool
     reviewer: str = Field(min_length=1, max_length=100)
 
@@ -164,6 +178,27 @@ def create_app(
         if video.parent != output_root or not video.is_file():
             raise HTTPException(status_code=404, detail="Final video is unavailable.")
         return FileResponse(video, media_type="video/mp4", headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
+
+    @application.post("/api/productions/{production_id}/review/{decision}", dependencies=[Depends(require_admin)])
+    def record_production_review(production_id: str, decision: str, body: ProductionReviewDecision) -> dict[str, Any]:
+        if decision not in {"approve", "reject"}:
+            raise HTTPException(status_code=404, detail="Review decision was not found.")
+        if not body.confirm_review:
+            raise HTTPException(status_code=400, detail="Explicit confirm_review=true is required.")
+        record = get_production_by_id(production_id, resolved_path)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Production was not found.")
+        if record["status"] not in {"needs_review", "completed"}:
+            raise HTTPException(status_code=409, detail="Production is not available for review.")
+        if record["metadata"].get("review_decision"):
+            raise HTTPException(status_code=409, detail="A review decision has already been recorded.")
+        meta = dict(record["metadata"])
+        if decision == "approve" and (meta.get("video_qa", {}).get("technical_status") != "passed" or meta.get("audio_qa", {}).get("technical_status") == "failed"):
+            raise HTTPException(status_code=409, detail="Production QA blocks approval.")
+        meta["review_decision"] = {"decision": decision, "reviewer": body.reviewer, "confirmed": True}
+        status = "completed" if decision == "approve" else "rejected"
+        updated = update_production(production_id, status, meta, database_path=resolved_path)
+        return {"production_id": updated["id"], "status": updated["status"], "review_decision": meta["review_decision"]}
 
     @application.get("/api/scripts/review", dependencies=[Depends(require_admin)])
     def scripts_awaiting_review(
