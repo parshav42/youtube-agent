@@ -25,7 +25,7 @@ from app.database.db import (
     update_production,
 )
 from app.reporting.daily_report import DailyReportService
-from app.reporting.scheduler import build_scheduler, run_scheduled_auto_publish, run_scheduled_report
+from app.reporting.scheduler import build_scheduler, run_scheduled_report
 from app.youtube.analytics import YouTubeAnalyticsError, YouTubeAnalyticsService
 from app.youtube.auth import GoogleOAuthService, YouTubeAuthError
 from app.youtube.publisher import YouTubePublishError, YouTubePublisher
@@ -461,10 +461,6 @@ def create_app(
         return run_scheduled_report(
             database_path=str(resolved_path), report_service=resolved_reports
         )
-
-    @application.post("/api/scheduler/run-auto-publish", dependencies=[Depends(require_admin)])
-    def run_auto_publish_job() -> dict[str, Any]:
-        return run_scheduled_auto_publish(database_path=str(resolved_path))
 
     return application
 

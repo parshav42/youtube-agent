@@ -12,7 +12,6 @@ from app.reporting.daily_report import DailyReportService
 from app.youtube.repository import claim_job, finish_job
 
 JOB_NAME = "daily-youtube-analytics-report"
-AUTO_PUBLISH_JOB_NAME = "youtube-auto-publish"
 
 
 def run_scheduled_report(
@@ -53,48 +52,7 @@ def build_scheduler(database_path: str | None = None) -> BackgroundScheduler:
         coalesce=True,
         misfire_grace_time=3600,
     )
-    from app.config import get_auto_publish_settings
-
-    settings = get_auto_publish_settings()
-    if settings["enabled"]:
-        try:
-            trigger = CronTrigger.from_crontab(str(settings["cron"]), timezone="UTC")
-        except ValueError as error:
-            raise ValueError("AUTO_PUBLISH_CRON must be a valid five-field cron expression.") from error
-        scheduler.add_job(
-            run_scheduled_auto_publish,
-            trigger=trigger,
-            id=AUTO_PUBLISH_JOB_NAME,
-            kwargs={"database_path": database_path or str(get_database_path())},
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=3600,
-        )
     return scheduler
-
-
-def run_scheduled_auto_publish(
-    *,
-    database_path: str | None = None,
-    auto_publish_service: Any | None = None,
-) -> dict[str, Any]:
-    """Run an auto-publish cycle under a restart-safe per-minute DB claim."""
-    from app.youtube.auto_publish import AutoPublishService
-
-    path = database_path or str(get_database_path())
-    slot = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M")
-    if not claim_job(AUTO_PUBLISH_JOB_NAME, slot, path, max_attempts=2):
-        return {"status": "already_claimed_or_completed", "run_slot": slot}
-    service = auto_publish_service or AutoPublishService(path)
-    try:
-        result = service.run()
-    except Exception as error:
-        safe_error = f"{type(error).__name__}: automatic publishing cycle failed."
-        finish_job(AUTO_PUBLISH_JOB_NAME, slot, status="failed", error=safe_error, database_path=path)
-        return {"status": "failed", "run_slot": slot, "error": safe_error}
-    finish_job(AUTO_PUBLISH_JOB_NAME, slot, status="completed", database_path=path)
-    return {"status": "completed", "run_slot": slot, "result": result}
 
 
 def _read_integer(name: str, default: int, minimum: int, maximum: int) -> int:

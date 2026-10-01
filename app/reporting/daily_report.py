@@ -11,7 +11,6 @@ from app.reporting.email_service import EmailDeliveryError, SMTPEmailService
 from app.youtube.analytics import YouTubeAnalyticsService, YouTubeAnalyticsError
 from app.youtube.repository import (
     get_productions_for_report,
-    get_publish_report_summary,
     get_report_history,
     save_report,
 )
@@ -38,7 +37,6 @@ class DailyReportService:
         day_start = datetime.combine(target_date, time.min, timezone.utc).isoformat()
         day_end = datetime.combine(target_date + timedelta(days=1), time.min, timezone.utc).isoformat()
         productions = get_productions_for_report(day_start, day_end, self.database_path)
-        publishing = get_publish_report_summary(day_start, day_end, self.database_path)
         analytics_start = target_date - timedelta(days=28)
         analytics_end = target_date - timedelta(days=1)
         analytics_result: dict[str, Any] = {
@@ -102,7 +100,6 @@ class DailyReportService:
                 for row in productions
             ],
             "analytics": analytics_result,
-            "publishing": publishing,
             "failed_operations": failed_operations,
             "recommended_technical_next_steps": _recommendations(failed_operations, analytics_result),
         }
@@ -188,26 +185,6 @@ def _render_markdown(report: dict[str, Any]) -> str:
             )
     else:
         lines.append("- No production records were created in this UTC reporting window.")
-    publishing = report["publishing"]
-    lines.extend([
-        "",
-        "## Publishing operations",
-        f"- Uploads attempted: {publishing['uploads_attempted']}",
-        f"- Uploads succeeded: {publishing['uploads_succeeded']}",
-        f"- Items waiting for review: {publishing['items_waiting_for_review']}",
-        f"- Reserved quota: {publishing['quota_usage']['quota_units']} units across {publishing['quota_usage']['uploads']} insert(s).",
-    ])
-    if publishing["public_video_urls"]:
-        lines.extend(f"- Public video: {item['video_url']}" for item in publishing["public_video_urls"])
-    else:
-        lines.append("- No public uploads were recorded in this reporting window.")
-    if publishing["failures"]:
-        lines.extend(
-            f"- Upload failure {item['production_id']}: {item['error']}"
-            for item in publishing["failures"]
-        )
-    else:
-        lines.append("- No upload failures were recorded in this reporting window.")
     lines.extend(["", "## Available analytics"])
     channel = report["analytics"]["channel"]
     if channel and channel["metrics_available"]:

@@ -60,58 +60,34 @@ python -m app.main --check-hf
 
 ### YouTube publishing and analytics (Day 4)
 
-All YouTube operations use Google's official YouTube Data API v3 and OAuth 2.0. Browser automation, scraping, and unofficial upload paths are not used. Public upload is requested explicitly and verified through the API after insertion.
+The local FastAPI service uses Google's official YouTube Data API v3 and YouTube Analytics API. It does not change or replace the Day 1–3 LangGraph/video workflows.
 
-#### Google Cloud setup and public-upload eligibility
+- In Google Cloud, enable **YouTube Data API v3** and **YouTube Analytics API**, configure the OAuth consent screen, and add the channel owner as a test user where applicable. Do not bypass Google's verification or app restrictions.
+- Create an OAuth **Web application** client with the exact authorized redirect URI `http://127.0.0.1:8000/api/youtube/auth/callback`; set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. The current callback validator is local-only. Use HTTPS and a hardened callback/auth boundary before non-local deployment.
+- Set `GOOGLE_TOKEN_ENCRYPTION_KEY` to a Fernet key generated locally, for example with `.venv/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'`. It encrypts OAuth credentials and resumable upload session URLs in SQLite. Back it up securely; losing/rotating it requires Google reauthorization and prevents resuming saved upload sessions.
+- Set `MOTIVATIONOS_ADMIN_TOKEN` to a locally generated high-entropy secret. Every administrative route requires it as a Bearer token. Keep the API bound to loopback; do not expose it publicly without TLS and a hardened authentication/deployment boundary. The OAuth callback carries a one-time authorization code in its query string; disable Uvicorn access logging and configure any reverse proxy to redact callback query strings.
+- The OAuth flow requests only `youtube.upload`, `youtube.readonly`, and `yt-analytics.readonly`. Google may require consent-screen setup, test-user access, verification, or reauthorization depending on project state and account policy. OAuth Testing mode may restrict refresh-token lifetime; monitor `/api/youtube/status` and reauthorize when required.
 
-1. Create/select a Google Cloud project owned by the channel operator, enable **YouTube Data API v3**, and enable **YouTube Analytics API** if reports/analytics are required. Confirm the API is enabled for the same project as the OAuth client.
-2. Configure the OAuth consent screen with the real app name, support contact, developer contact, and privacy policy/terms URLs required by Google. Add the channel owner as a test user while the app is in Testing. Testing-mode refresh tokens can expire; reauthorization may be needed.
-3. Create an OAuth **Web application** client. Register the exact redirect URI `http://127.0.0.1:8000/api/youtube/auth/callback`; set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. The current callback validator is local-only. Use HTTPS and a hardened callback/auth boundary before any non-local deployment.
-4. The app requests `https://www.googleapis.com/auth/youtube.upload` for uploads, `https://www.googleapis.com/auth/youtube.readonly` for channel identity, video reconciliation, and listing, and `https://www.googleapis.com/auth/yt-analytics.readonly` for analytics. Reconnect OAuth after changing scopes.
-5. Complete Google's OAuth app verification when the consent screen requires it. OAuth verification and the **YouTube API Services audit** are distinct. YouTube's policy restricts public uploads from API projects that have not passed the required audit; uploads can be forced to private even when the API request asked for public. Follow Google's current API Services audit instructions in the Cloud Console/YouTube API Services documentation and submit the actual app, privacy disclosures, and compliant use case for review. Do not try to work around this restriction. MotivationOS detects a private result and records a clear failure; it will not call that a public success.
-6. YouTube Data API's default project quota is commonly 10,000 units/day. A `videos.insert` costs about 1,600 units, so a default of five automatic uploads leaves headroom for other calls. This app enforces both the 10,000-unit budget and `MAX_UPLOADS_PER_DAY`. For more capacity, review actual Cloud Console quota metrics, use the quota-increase request workflow for YouTube Data API v3, explain the compliant use case and expected volume, and wait for Google's approval. A quota request is not a guarantee of an increase.
-
-Generate `GOOGLE_TOKEN_ENCRYPTION_KEY` locally using `.venv/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())`. It encrypts OAuth credentials and resumable upload URLs in SQLite; losing/rotating it requires reauthorization and prevents resuming saved sessions. Set `MOTIVATIONOS_ADMIN_TOKEN` to a locally generated high-entropy secret. Keep the API bound to loopback, disable Uvicorn access logging, and redact OAuth callback query strings.
-
-#### Manual and automatic operation
-
-Manual review remains available and is the default. Complete and review a production, then use `POST /api/publishing/{production_id}/review`, explicitly approve its visibility with `POST /api/publishing/{production_id}/approve`, and upload with `POST /api/publishing/{production_id}/upload`. Public approval requires explicit `confirm_public=true`. The per-production state and resumable upload session survive restarts.
-
-Automatic mode is off by default and requires all of the following:
-
-- Set `MOTIVATIONOS_SCHEDULER_ENABLED=true` to run the in-process scheduler, then set `AUTO_PUBLISH_ENABLED=true` and a five-field UTC `AUTO_PUBLISH_CRON` (default `0 9 * * *`). The `/api/scheduler/run-auto-publish` route runs one protected cycle immediately.
-- Set `YOUTUBE_PRIVACY_STATUS=public`. Automatic publishing rejects other visibility values. Set `AUTO_APPROVE_SCRIPTS=true` and `AUTO_APPROVE_PRODUCTIONS=true` only after deciding to delegate both human gates.
-- Set thresholds `MIN_SCRIPT_QUALITY_SCORE`, `MIN_AUDIO_QUALITY_SCORE`, and `MIN_VIDEO_QUALITY_SCORE` on a 0–10 scale. Current audio/video QA emit pass/fail rather than numeric scores, so a technical pass is represented as 10 and any other status as 0; audio and video must still report `passed`.
-- Set `MAX_UPLOADS_PER_DAY` (default 5), `YOUTUBE_CATEGORY_ID` (default 22), and optionally `YOUTUBE_PLAYLIST_ID`. `YOUTUBE_NOTIFY_SUBSCRIBERS` and `YOUTUBE_MADE_FOR_KIDS` default to false. Audience designation is the operator's responsibility; set the value accurately for the content.
-- Complete live Hugging Face configuration, real TTS configuration, FFmpeg/FFprobe setup, and provide one user-authorized scene image per scene plus complete `LICENSES.json` provenance. Missing providers/assets fail closed. The bundled sample research is not used by scheduled automation; it requires the configured Hugging Face research provider.
-
-Every automatic decision checks the script evaluation and policy flags, configured scores, passing audio/video QA, scene asset provenance, and a recorded matching SHA-256 hash. A failed gate stays `needs_review` with reasons on the record. YouTube uploads are unique per production/channel, reserve quota durably, retry with backoff, and reconcile ambiguous outcomes before any retry. A missing OAuth connection, channel mismatch, quota exhaustion, incomplete provenance, failed QA, or unaudited project prevents public success.
-
-Start the local API after configuration:
+Start the local API:
 
 ```bash
 set -a; . ./.env; set +a
 .venv/bin/uvicorn app.api:app --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
-Call `GET /api/youtube/auth/start` with the admin Bearer token, visit its returned authorization URL, and complete consent. OAuth state and PKCE are validated; tokens are stored encrypted. `/api/youtube/status` never returns tokens.
+Call `GET /api/youtube/auth/start` with the admin Bearer token, visit its returned authorization URL, and complete consent. The loopback callback validates single-use OAuth state and PKCE, then stores encrypted credentials. `/api/youtube/status` reports configuration/connection state without returning tokens.
 
-Uploads use the official resumable MediaUpload API. Each production has a unique upload record, and its ID is embedded as a description reconciliation marker. Interrupted sessions resume with the encrypted saved session URL. If the outcome is ambiguous and no resumable URL exists, the scheduler searches the authenticated channel for that exact marker and persists an ID only when exactly one match is returned; no match does not authorize re-upload. Inspect `/api/publishing/{production_id}/status`; cancellation retains its audit record. Available thumbnails are uploaded through the official API, and a configured playlist is added after the video upload.
+Publishing requires three separate human actions. A completed production must have its actual `final.mp4` and Day 3 `metadata.json`. `POST /api/publishing/{production_id}/review` validates both and snapshots the generated title, description, tags, language, and category for inspection. `POST /api/publishing/{production_id}/approve` requires `{"confirm_approval":true}`; public visibility additionally requires `{"confirm_public":true}`. Only then can `POST /api/publishing/{production_id}/upload` upload. Visibility defaults to private, and public publishing is never scheduled. An upload is reported as successful only after YouTube returns a video ID.
+
+Uploads use the official resumable MediaUpload API. Each production has a unique upload record, and its ID is embedded as a description reconciliation marker. Interrupted sessions resume with the encrypted saved session URL. If the outcome is ambiguous and no resumable URL exists, automatic re-upload is blocked. `POST /api/publishing/{production_id}/reconcile` searches the authenticated channel for that exact marker and persists an ID only when exactly one match is returned. No match does not authorize automatic re-upload. Inspect durable state at `/api/publishing/{production_id}/status`; cancellation retains its audit record.
 
 `GET /api/youtube/videos` lists the authenticated channel's uploads. Analytics endpoints query Google and persist only returned metric/date values; empty results are marked unavailable, not fabricated zeroes. The default range is the prior 28 complete days because YouTube metrics may be delayed. Use `/api/analytics/channel` and `/api/analytics/videos/{video_id}` with optional ISO `start_date` and `end_date`.
 
 `POST /api/reports/daily` saves Markdown under `MOTIVATIONOS_REPORT_DIR` (default `data/reports/`) before attempting email. Configure `SMTP_HOST`, `EMAIL_FROM`, `EMAIL_TO`, and, if required, `SMTP_USERNAME`/`SMTP_PASSWORD`; port 587 uses STARTTLS and 465 uses implicit TLS. If email settings are missing, the local report is still saved and email is `not_configured`. SMTP acceptance does not guarantee inbox delivery. An interrupted send is marked `delivery_unknown` and is not resent automatically.
 
-Set `MOTIVATIONOS_SCHEDULER_ENABLED=true` to start the UTC daily report job (default 08:00) and, independently, the auto-publish cron when enabled. Durable SQLite claims prevent duplicate schedule-slot execution; upload claims and uniqueness prevent duplicate production uploads. The API exposes authenticated manual triggers for both jobs. Additive tables and columns preserve existing production, script, and research data.
+Set `MOTIVATIONOS_SCHEDULER_ENABLED=true` to start the in-process UTC daily analytics/report job (default 08:00 UTC). It never uploads or publishes. SQLite stores job claims and limits retries to three; duplicate daily executions are blocked. The API also exposes an authenticated manual trigger. All new tables are additive; existing production, script, and research rows are retained.
 
-#### Verify and troubleshoot a live upload
-
-1. Keep `AUTO_PUBLISH_ENABLED=false` while setting up and reviewing. Start the loopback API, complete OAuth, and confirm `/api/youtube/status` reports connected.
-2. Complete a production and human review, verify its media and provenance, then create and approve a **public** publishing record. Use `/api/publishing/{production_id}/upload` for the manual path.
-3. Confirm the response and `/api/publishing/{production_id}/status` show `status=uploaded`, `visibility=public`, a video ID, and the saved URL. Open the URL in a signed-out/private browser window to confirm public access. The API status is authoritative for the recorded privacy setting; YouTube processing/publication can still take time.
-4. For one explicitly approved live smoke test, run `RUN_LIVE_YOUTUBE=1 .venv/bin/python scripts/live_publish_smoke.py <production_id>`. It requires an existing approved public record and prints the verified video URL. Never run it against an unreviewed production.
-
-If an upload is recorded as private after a public request, stop automatic retries and complete the YouTube API Services audit for the OAuth API project; changing the request or creating another project to evade the restriction is not a remedy. For 403 errors, check audit status, OAuth scopes/consent, the authenticated channel ID, API enablement, and quota. `quotaExceeded` pauses retries until the next UTC day. For an ambiguous upload, reconcile first; the app deliberately blocks a second insert if it cannot prove that the first one did not publish.
+Google enforces project-level API quotas, OAuth consent/testing policies, channel permissions, and upload restrictions. Check current quota in Google Cloud Console before production use. Unverified YouTube API projects may be restricted to private visibility; respect the current project-specific restriction and API terms. Quota exhaustion, API enablement errors, delayed metrics, or revoked credentials are surfaced as failures, not successful operations.
 
 ### Narration
 
