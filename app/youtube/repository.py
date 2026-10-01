@@ -496,6 +496,7 @@ def update_upload_progress(
     api_response: dict[str, Any] | None = None,
     error: str | None = None,
     visibility: str | None = None,
+    clear_resumable_uri: bool = False,
     database_path: str | Path | None = None,
 ) -> dict[str, Any]:
     if status not in {"awaiting_review", "approved", "uploading", "uploaded_private", "uploaded", "failed", "cancelled"}:
@@ -504,7 +505,15 @@ def update_upload_progress(
     uploaded_at = now if status in {"uploaded_private", "uploaded"} else None
     encoded_response = json.dumps(api_response, ensure_ascii=False) if api_response is not None else None
     with _connection(database_path) as connection:
-        if resumable_uri is None:
+        if clear_resumable_uri:
+            connection.execute(
+                """UPDATE youtube_uploads SET status = ?, resumable_uri = NULL,
+                    video_id = COALESCE(?, video_id), api_response_json = COALESCE(?, api_response_json),
+                    error = ?, lease_until = NULL, uploaded_at = COALESCE(?, uploaded_at), updated_at = ?
+                WHERE production_id = ?""",
+                (status, video_id, encoded_response, error, uploaded_at, now, production_id),
+            )
+        elif resumable_uri is None:
             connection.execute(
                 """UPDATE youtube_uploads SET status = ?, video_id = COALESCE(?, video_id),
                     api_response_json = COALESCE(?, api_response_json), error = ?, lease_until = NULL,

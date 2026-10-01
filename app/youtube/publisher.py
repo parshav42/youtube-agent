@@ -1,6 +1,8 @@
 """Human-approved, resumable YouTube Data API uploads."""
 
 import json
+import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -27,6 +29,14 @@ class YouTubePublishError(RuntimeError):
     """A safe-to-display upload error that never includes credentials."""
 
 
+class _UnverifiedUploadResult(YouTubePublishError):
+    """A terminal response that cannot safely authorize a completed state."""
+
+    def __init__(self, response_summary: dict[str, Any], message: str = "YouTube returned an unverified upload result.") -> None:
+        super().__init__(message)
+        self.response_summary = response_summary
+
+
 class PublishingMetadata(BaseModel):
     """Metadata snapshotted for review and then sent to YouTube."""
 
@@ -38,6 +48,7 @@ class PublishingMetadata(BaseModel):
     language: str = Field(min_length=2, max_length=35)
     category_id: str = Field(pattern=r"^\d{1,3}$")
     publishing_notes: str = Field(default="", max_length=1000)
+    self_declared_made_for_kids: bool | None = None
 
     @field_validator("title", "description", "language", "category_id", mode="before")
     @classmethod
@@ -104,7 +115,8 @@ class YouTubePublisher:
         production_id: str,
         *,
         channel_id: str | None = None,
-        visibility: str | None = None,
+        visibility: str,
+        self_declared_made_for_kids: bool,
         confirm_public: bool = False,
     ) -> dict[str, Any]:
         """Record explicit human approval and the exact visibility choice."""
@@ -115,12 +127,18 @@ class YouTubePublisher:
         if upload is None or upload["status"] != "awaiting_review":
             raise YouTubePublishError("A conflicting or active upload record already exists.")
         self._load_completed_production(production_id)
-        selected_visibility = visibility or approval["visibility"]
+        selected_visibility = visibility
+        if selected_visibility not in {"private", "unlisted", "public"}:
+            raise YouTubePublishError("An explicit valid publishing visibility is required.")
         if selected_visibility == "public" and not confirm_public:
             raise YouTubePublishError(
                 "Public visibility requires confirm_public=true in the explicit approval request."
             )
         metadata = PublishingMetadata.model_validate(approval["metadata"])
+        if type(self_declared_made_for_kids) is not bool:
+            raise YouTubePublishError("An explicit audience setting is required for publishing approval.")
+        approval_metadata = metadata.model_dump(mode="json")
+        approval_metadata["self_declared_made_for_kids"] = self_declared_made_for_kids
         approved_channel_id = channel_id.strip() if isinstance(channel_id, str) else ""
         if not approved_channel_id:
             record_channel_identity_audit(
@@ -155,24 +173,14 @@ class YouTubePublisher:
                 database_path=self.database_path,
             )
             raise YouTubePublishError("The authenticated YouTube channel could not be verified.")
-        saved_approval = approve_production(
+        return approve_production(
             production_id,
             selected_visibility,
-            metadata.model_dump(mode="json"),
+            approval_metadata,
             self.database_path,
             approved_channel_id=approved_channel_id,
             authenticated_channel_id_at_approval=authenticated_channel_id,
         )
-        record_channel_identity_audit(
-            production_id,
-            phase="approval",
-            outcome="verified",
-            reason="approval_identity_recorded",
-            approved_channel_id=approved_channel_id,
-            authenticated_channel_id=authenticated_channel_id,
-            database_path=self.database_path,
-        )
-        return saved_approval
 
     def upload(self, production_id: str) -> dict[str, Any]:
         """Start or resume the one authorized resumable upload for a production."""
@@ -197,7 +205,15 @@ class YouTubePublisher:
         try:
             credentials = self.oauth.authorized_credentials()
         except Exception as error:
-            raise YouTubePublishError(str(error)) from error
+            record_channel_identity_audit(
+                production_id,
+                phase="upload",
+                outcome="rejected",
+                reason="authenticated_channel_unavailable",
+                approved_channel_id=approval.get("approved_channel_id"),
+                database_path=self.database_path,
+            )
+            raise YouTubePublishError("The authenticated YouTube channel could not be verified.") from error
         try:
             service = self.api_builder(credentials)
             self._verify_channel_identity(production_id, approval, service)
@@ -223,6 +239,7 @@ class YouTubePublisher:
                 },
                 "status": {
                     "privacyStatus": approval["visibility"],
+                    "selfDeclaredMadeForKids": metadata.self_declared_made_for_kids,
                 },
             }
             media_body = self.media_upload_factory(video_path)
@@ -248,11 +265,8 @@ class YouTubePublisher:
                         visibility=approval["visibility"],
                         database_path=self.database_path,
                     )
-            video_id = response.get("id") if isinstance(response, dict) else None
-            if not video_id:
-                raise YouTubePublishError(
-                    "YouTube returned no video ID; upload remains failed and will not be restarted automatically."
-                )
+            video_id = self._validate_upload_result(response, approval)
+            self._verify_remote_upload(service, video_id, approval)
             final_status = "uploaded_private" if approval["visibility"] == "private" else "uploaded"
             return update_upload_progress(
                 production_id,
@@ -264,6 +278,16 @@ class YouTubePublisher:
             )
         except Exception as error:
             resumable_uri = getattr(request, "resumable_uri", None) if request is not None else None
+            if isinstance(error, _UnverifiedUploadResult):
+                self._mark_failed(
+                    production_id,
+                    approval["visibility"],
+                    None,
+                    str(error),
+                    clear_resumable_uri=True,
+                    api_response=error.response_summary,
+                )
+                raise
             if isinstance(error, YouTubePublishError) and not upload_started:
                 self._mark_failed(
                     production_id,
@@ -364,12 +388,33 @@ class YouTubePublisher:
             raise YouTubePublishError("Publishing record was not found.")
         if upload.get("video_id"):
             return {"production_id": production_id, "status": upload["status"], "video_id": upload["video_id"], "reconciled": True}
+        expired_without_session = (
+            upload["status"] == "uploading"
+            and not upload.get("resumable_uri")
+            and self._upload_lease_expired(upload.get("lease_until"))
+        )
+        if expired_without_session:
+            approval = get_approval(production_id, self.database_path)
+            if approval is None:
+                raise YouTubePublishError("Publishing approval was not found.")
+            upload = update_upload_progress(
+                production_id,
+                status="failed",
+                error="Upload was interrupted before a resumable session was saved; reconciliation is required.",
+                visibility=approval["visibility"],
+                clear_resumable_uri=True,
+                database_path=self.database_path,
+            )
         if upload["status"] != "failed" or upload.get("resumable_uri"):
             raise YouTubePublishError(
-                "Reconciliation is only available after a failed upload without a resumable session."
+                "Reconciliation requires a failed upload or an expired upload without a resumable session."
             )
         try:
+            approval = get_approval(production_id, self.database_path)
+            if approval is None:
+                raise YouTubePublishError("Publishing approval was not found.")
             service = self.api_builder(self.oauth.authorized_credentials())
+            self._verify_channel_identity(production_id, approval, service)
             marker = f"MotivationOS production reference: {production_id}"
             search = service.search().list(
                 part="id,snippet", q=production_id, type="video", forMine=True, maxResults=25
@@ -385,6 +430,11 @@ class YouTubePublisher:
                 for video in details.get("items", []):
                     description = video.get("snippet", {}).get("description", "")
                     if marker in description:
+                        if video.get("id") != candidate_id:
+                            raise _UnverifiedUploadResult(
+                                self._safe_upload_result_summary(video),
+                                "YouTube reconciliation returned an unverified upload result.",
+                            )
                         matches.append(video)
             if not matches:
                 return {
@@ -398,12 +448,13 @@ class YouTubePublisher:
                     "More than one YouTube video contains this production reference; manual resolution is required."
                 )
             video = matches[0]
-            visibility = video.get("status", {}).get("privacyStatus", upload["visibility"])
+            video_id = self._validate_upload_result(video, approval)
+            visibility = approval["visibility"]
             final_status = "uploaded_private" if visibility == "private" else "uploaded"
             saved = update_upload_progress(
                 production_id,
                 status=final_status,
-                video_id=video["id"],
+                video_id=video_id,
                 api_response=video,
                 visibility=visibility,
                 database_path=self.database_path,
@@ -459,6 +510,18 @@ class YouTubePublisher:
         channel_id = channels[0].get("id")
         return channel_id.strip() if isinstance(channel_id, str) and channel_id.strip() else None
 
+    @staticmethod
+    def _upload_lease_expired(lease_until: str | None) -> bool:
+        if lease_until is None:
+            return True
+        try:
+            lease_expiry = datetime.fromisoformat(lease_until)
+        except ValueError:
+            return False
+        if lease_expiry.tzinfo is None:
+            return False
+        return lease_expiry <= datetime.now(timezone.utc)
+
     def _verify_channel_identity(
         self,
         production_id: str,
@@ -504,6 +567,82 @@ class YouTubePublisher:
             authenticated_channel_id=authenticated_channel_id,
             database_path=self.database_path,
         )
+
+    @staticmethod
+    def _validate_upload_result(response: Any, approval: dict[str, Any]) -> str:
+        if not isinstance(response, dict):
+            raise _UnverifiedUploadResult(YouTubePublisher._safe_upload_result_summary(response))
+        video_id = response.get("id")
+        if not isinstance(video_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id) is None:
+            raise _UnverifiedUploadResult(YouTubePublisher._safe_upload_result_summary(response))
+        snippet = response.get("snippet")
+        channel_id = snippet.get("channelId") if isinstance(snippet, dict) else None
+        approved_channel_id = approval.get("approved_channel_id")
+        if not isinstance(channel_id, str) or channel_id != approved_channel_id:
+            raise _UnverifiedUploadResult(YouTubePublisher._safe_upload_result_summary(response))
+        status = response.get("status")
+        privacy_status = status.get("privacyStatus") if isinstance(status, dict) else None
+        if (
+            privacy_status not in {"private", "unlisted", "public"}
+            or privacy_status != approval.get("visibility")
+        ):
+            raise _UnverifiedUploadResult(YouTubePublisher._safe_upload_result_summary(response))
+        audience_status = status.get("selfDeclaredMadeForKids")
+        expected_audience = approval.get("metadata", {}).get("self_declared_made_for_kids")
+        if type(audience_status) is not bool or audience_status != expected_audience:
+            raise _UnverifiedUploadResult(YouTubePublisher._safe_upload_result_summary(response))
+        return video_id
+
+    @staticmethod
+    def _verify_remote_upload(
+        service: Any,
+        video_id: str,
+        approval: dict[str, Any],
+    ) -> None:
+        try:
+            result = service.videos().list(
+                part="snippet,status", id=video_id, maxResults=1
+            ).execute(num_retries=0)
+        except Exception as error:
+            raise _UnverifiedUploadResult(
+                {"response_type": "remote_verification_unavailable"}
+            ) from error
+        items = result.get("items") if isinstance(result, dict) else None
+        if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
+            raise _UnverifiedUploadResult({"response_type": "remote_video_not_retrievable"})
+        remote_video_id = YouTubePublisher._validate_upload_result(items[0], approval)
+        if remote_video_id != video_id:
+            raise _UnverifiedUploadResult(
+                YouTubePublisher._safe_upload_result_summary(items[0])
+            )
+
+    @staticmethod
+    def _safe_upload_result_summary(response: Any) -> dict[str, Any]:
+        if not isinstance(response, dict):
+            return {"response_type": type(response).__name__[:32]}
+        summary: dict[str, Any] = {}
+        video_id = response.get("id")
+        if isinstance(video_id, str):
+            if re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+                summary["id"] = video_id
+            else:
+                summary["id_format"] = "invalid"
+        snippet = response.get("snippet")
+        channel_id = snippet.get("channelId") if isinstance(snippet, dict) else None
+        if isinstance(channel_id, str):
+            summary["channel_id"] = channel_id[:64]
+        status = response.get("status")
+        privacy_status = status.get("privacyStatus") if isinstance(status, dict) else None
+        if isinstance(privacy_status, str):
+            summary["privacy_status"] = (
+                privacy_status
+                if privacy_status in {"private", "unlisted", "public"}
+                else "invalid"
+            )
+        audience_status = status.get("selfDeclaredMadeForKids") if isinstance(status, dict) else None
+        if type(audience_status) is bool:
+            summary["audience_status"] = audience_status
+        return summary
 
     def _load_metadata(self, production: dict[str, Any]) -> PublishingMetadata:
         artifact_path = Path(production["output_dir"]) / "metadata.json"
@@ -593,11 +732,14 @@ class YouTubePublisher:
         visibility: str,
         resumable_uri: str | None,
         error: str,
+        *,
+        clear_resumable_uri: bool = False,
+        api_response: dict[str, Any] | None = None,
     ) -> None:
         current = get_upload(production_id, self.database_path)
         if current is None:
             return
-        saved_uri = (
+        saved_uri = None if clear_resumable_uri else (
             self.oauth.encrypt_persistent_secret(resumable_uri)
             if resumable_uri
             else current.get("resumable_uri")
@@ -608,6 +750,8 @@ class YouTubePublisher:
             resumable_uri=saved_uri,
             visibility=visibility,
             error=error,
+            api_response=api_response,
+            clear_resumable_uri=clear_resumable_uri,
             database_path=self.database_path,
         )
 

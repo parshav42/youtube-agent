@@ -12,7 +12,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from app.config import get_database_path
 from app.database.db import (
@@ -46,7 +46,8 @@ class ApprovalRequest(BaseModel):
 
     confirm_approval: bool
     channel_id: str | None = Field(default=None, max_length=64)
-    visibility: str | None = Field(default=None, pattern="^(private|unlisted|public)$")
+    visibility: str = Field(pattern="^(private|unlisted|public)$")
+    self_declared_made_for_kids: StrictBool
     confirm_public: bool = False
 
 
@@ -373,6 +374,7 @@ def create_app(
                 production_id,
                 channel_id=body.channel_id,
                 visibility=body.visibility,
+                self_declared_made_for_kids=body.self_declared_made_for_kids,
                 confirm_public=body.confirm_public,
             )
             return _approval_response(approval)

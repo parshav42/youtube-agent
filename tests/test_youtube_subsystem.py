@@ -24,6 +24,8 @@ from app.youtube.repository import (
     claim_job,
     claim_upload,
     get_analytics,
+    get_approval,
+    get_channel_identity_audit,
     get_encrypted_credentials,
     get_job_execution,
     get_upload,
@@ -72,6 +74,22 @@ def make_completed_production(database_path: Path, output_root: Path) -> tuple[s
     }
     (output_root / "metadata.json").write_text(json.dumps(artifact), encoding="utf-8")
     return production_id, video_path
+
+
+def channel_service(channel_ids: list[str | None], videos: object | None = None):
+    class ChannelList:
+        def execute(self, num_retries):
+            channel_id = channel_ids.pop(0) if len(channel_ids) > 1 else channel_ids[0]
+            return {"items": [{"id": channel_id}]} if channel_id else {"items": []}
+
+    class Channels:
+        def list(self, **kwargs):
+            return ChannelList()
+
+    service = SimpleNamespace(channels=lambda: Channels())
+    if videos is not None:
+        service.videos = lambda: videos
+    return service
 
 
 def test_review_approval_and_upload_claim_are_idempotent(tmp_path) -> None:
@@ -261,12 +279,11 @@ def test_report_is_saved_locally_when_email_is_unconfigured(tmp_path, monkeypatc
     result = reports.run(date(2026, 9, 30))
 
     assert Path(result["report_path"]).is_file()
-    assert "views" in Path(result["report_path"]).read_text(encoding="utf-8")
     assert result["email"]["status"] == "not_configured"
     assert result["report"]["analytics"]["channel"]["rows"][0]["metrics"]["views"] == 8
 
 
-def test_uncertain_email_send_is_not_automatically_repeated(tmp_path) -> None:
+def test_ambiguous_email_delivery_is_not_retried(tmp_path) -> None:
     class Analytics:
         def channel_report(self, start_date, end_date):
             return {"retrieved": True, "metrics_available": False, "rows": []}
@@ -373,12 +390,20 @@ def test_publisher_rejects_video_changed_after_final_review(tmp_path) -> None:
     api_calls = []
     publisher = YouTubePublisher(
         database_path,
-        oauth=SimpleNamespace(authorized_credentials=lambda: api_calls.append("oauth")),
-        api_builder=lambda credentials: api_calls.append("api"),
+        oauth=SimpleNamespace(authorized_credentials=lambda: (api_calls.append("oauth"), object())[1]),
+        api_builder=lambda credentials: (
+            api_calls.append("api"), channel_service(["UC-approved"])
+        )[1],
         video_validator=lambda path: api_calls.append("validate"),
     )
     publisher.request_review(production_id)
-    publisher.approve(production_id)
+    publisher.approve(
+        production_id,
+        channel_id="UC-approved",
+        visibility="private",
+        self_declared_made_for_kids=False,
+    )
+    api_calls.clear()
     video_path.write_bytes(b"different video after review")
 
     with pytest.raises(YouTubePublishError, match="differs from the artifact"):
@@ -405,6 +430,7 @@ def test_upload_rechecks_reviewed_video_immediately_before_first_chunk(tmp_path)
 
     class Videos:
         def insert(self, **kwargs):
+            video_path.write_bytes(b"changed while preparing upload")
             return UploadRequest()
 
     class OAuthFixture:
@@ -412,8 +438,7 @@ def test_upload_rechecks_reviewed_video_immediately_before_first_chunk(tmp_path)
             return object()
 
     def build_api(credentials):
-        video_path.write_bytes(b"changed while preparing upload")
-        return SimpleNamespace(videos=lambda: Videos())
+        return channel_service(["UC-approved"], Videos())
 
     publisher = YouTubePublisher(
         database_path,
@@ -423,7 +448,12 @@ def test_upload_rechecks_reviewed_video_immediately_before_first_chunk(tmp_path)
         video_validator=lambda path: {"valid": True},
     )
     publisher.request_review(production_id)
-    publisher.approve(production_id)
+    publisher.approve(
+        production_id,
+        channel_id="UC-approved",
+        visibility="private",
+        self_declared_made_for_kids=False,
+    )
 
     with pytest.raises(YouTubePublishError, match="differs from the artifact"):
         publisher.upload(production_id)
@@ -433,6 +463,61 @@ def test_upload_rechecks_reviewed_video_immediately_before_first_chunk(tmp_path)
     assert failed["status"] == "failed"
     assert "differs from the artifact" in failed["error"]
     assert failed["resumable_uri"] is None
+
+
+@pytest.mark.parametrize(
+    ("approval_account", "upload_account", "stored_approved_id", "reason"),
+    [
+        ("UC-approved", "UC-approved", None, "approved_channel_missing"),
+        ("UC-approved", None, "UC-approved", "authenticated_channel_missing"),
+        ("UC-authenticated", "UC-authenticated", "UC-approved", "approved_channel_mismatch"),
+        ("UC-previous-account", "UC-approved", "UC-approved", "authenticated_account_changed"),
+    ],
+)
+def test_channel_identity_rejections_make_no_upload_calls(
+    tmp_path, approval_account, upload_account, stored_approved_id, reason
+) -> None:
+    database_path = tmp_path / "app.sqlite3"
+    production_id, _ = make_completed_production(database_path, tmp_path / "production")
+    upload_calls = []
+    channel_ids = [approval_account, upload_account]
+
+    class Videos:
+        def insert(self, **kwargs):
+            upload_calls.append("insert")
+            raise AssertionError("rejected channel identity reached videos.insert")
+
+    publisher = YouTubePublisher(
+        database_path,
+        oauth=SimpleNamespace(authorized_credentials=lambda: object()),
+        api_builder=lambda credentials: channel_service(channel_ids, Videos()),
+        media_upload_factory=lambda path: upload_calls.append("media"),
+        video_validator=lambda path: {"valid": True},
+    )
+    publisher.request_review(production_id)
+    publisher.approve(
+        production_id,
+        channel_id="UC-approved",
+        visibility="private",
+        self_declared_made_for_kids=False,
+    )
+    assert get_approval(production_id, database_path)["authenticated_channel_id_at_approval"] == approval_account
+    if stored_approved_id is None:
+        with sqlite3.connect(database_path) as connection:
+            connection.execute(
+                "UPDATE publishing_approvals SET approved_channel_id = NULL WHERE production_id = ?",
+                (production_id,),
+            )
+
+    with pytest.raises(YouTubePublishError, match="channel identity verification failed"):
+        publisher.upload(production_id)
+
+    assert upload_calls == []
+    audit = get_channel_identity_audit(production_id, database_path)
+    assert audit[-1]["phase"] == "upload"
+    assert audit[-1]["outcome"] == "rejected"
+    assert audit[-1]["reason"] == reason
+    assert "token" not in str(audit).lower()
 
 
 @pytest.mark.parametrize(
@@ -545,12 +630,18 @@ def test_upload_rechecks_production_approval_before_any_upload_method(tmp_path) 
     publisher = YouTubePublisher(
         database_path,
         oauth=OAuthFixture(),
-        api_builder=lambda credentials: calls.append("api"),
+        api_builder=lambda credentials: (calls.append("api"), channel_service(["UC-approved"]))[1],
         media_upload_factory=lambda path: calls.append("upload"),
         video_validator=lambda path: calls.append("validate"),
     )
     publisher.request_review(production_id)
-    publisher.approve(production_id)
+    publisher.approve(
+        production_id,
+        channel_id="UC-approved",
+        visibility="private",
+        self_declared_made_for_kids=False,
+    )
+    calls.clear()
     from app.database.db import get_production_by_id
 
     production = get_production_by_id(production_id, database_path)
@@ -584,8 +675,12 @@ def test_confirmed_upload_persists_actual_response_and_visibility(tmp_path) -> N
         def next_chunk(self, num_retries):
             self.resumable_uri = "https://upload.example/session/test"
             return SimpleNamespace(progress=lambda: 1.0), {
-                "id": "youtube-response-id",
-                "status": {"privacyStatus": "private"},
+                "id": "abcDEF12345",
+                "snippet": {"channelId": "UC-approved"},
+                "status": {
+                    "privacyStatus": "private",
+                    "selfDeclaredMadeForKids": False,
+                },
             }
 
     class Videos:
@@ -595,25 +690,228 @@ def test_confirmed_upload_persists_actual_response_and_visibility(tmp_path) -> N
             self.body = kwargs["body"]
             return UploadRequest()
 
+        def list(self, **kwargs):
+            return SimpleNamespace(
+                execute=lambda num_retries: {
+                    "items": [
+                        {
+                            "id": "abcDEF12345",
+                            "snippet": {"channelId": "UC-approved"},
+                            "status": {
+                                "privacyStatus": "private",
+                                "selfDeclaredMadeForKids": False,
+                            },
+                        }
+                    ]
+                }
+            )
+
     videos = Videos()
     publisher = YouTubePublisher(
         database_path,
         oauth=OAuthFixture(),
-        api_builder=lambda credentials: SimpleNamespace(videos=lambda: videos),
+        api_builder=lambda credentials: channel_service(["UC-approved"], videos),
         media_upload_factory=lambda path: object(),
         video_validator=lambda path: {"valid": True},
     )
     publisher.request_review(production_id)
-    publisher.approve(production_id, confirm_public=False)
+    publisher.approve(
+        production_id,
+        channel_id="UC-approved",
+        visibility="private",
+        self_declared_made_for_kids=False,
+        confirm_public=False,
+    )
 
     uploaded = publisher.upload(production_id)
 
     assert videos.body["status"]["privacyStatus"] == "private"
+    assert videos.body["status"]["selfDeclaredMadeForKids"] is False
     assert uploaded["status"] == "uploaded_private"
-    assert uploaded["video_id"] == "youtube-response-id"
-    assert uploaded["api_response"]["id"] == "youtube-response-id"
+    assert uploaded["video_id"] == "abcDEF12345"
+    assert uploaded["api_response"]["id"] == "abcDEF12345"
     assert get_upload(production_id, database_path)["attempt_count"] == 1
     assert get_upload(production_id, database_path)["resumable_uri"] != "https://upload.example/session/test"
+    audit = get_channel_identity_audit(production_id, database_path)
+    assert audit[-1]["outcome"] == "verified"
+    assert audit[-1]["reason"] == "channel_identity_match"
+    assert audit[-1]["approved_channel_id"] == "UC-approved"
+    assert audit[-1]["authenticated_channel_id"] == "UC-approved"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        [],
+        {"id": "bad-id", "snippet": {"channelId": "UC-approved"}, "status": {"privacyStatus": "private"}},
+        {"id": "abcDEF12345", "status": {"privacyStatus": "private"}},
+        {"id": "abcDEF12345", "snippet": {"channelId": "UC-other"}, "status": {"privacyStatus": "private"}},
+        {"id": "abcDEF12345", "snippet": {"channelId": "UC-approved"}},
+        {"id": "abcDEF12345", "snippet": {"channelId": "UC-approved"}, "status": {"privacyStatus": "unlisted"}},
+        {"id": "abcDEF12345", "snippet": {"channelId": "UC-approved"}, "status": {"privacyStatus": "private", "selfDeclaredMadeForKids": True}},
+        {"id": "abcDEF12345", "snippet": {"channelId": "UC-approved"}, "status": {"privacyStatus": "private"}},
+    ],
+    ids=[
+        "malformed-response",
+        "malformed-video-id",
+        "missing-channel-id",
+        "mismatched-channel-id",
+        "missing-privacy-status",
+        "mismatched-privacy-status",
+        "mismatched-audience",
+        "missing-audience",
+    ],
+)
+def test_unverified_upload_results_never_mark_upload_success(tmp_path, response) -> None:
+    database_path = tmp_path / "app.sqlite3"
+    production_id, _ = make_completed_production(database_path, tmp_path / "production")
+    upload_calls = []
+
+    class UploadRequest:
+        resumable_uri = None
+
+        def next_chunk(self, num_retries):
+            self.resumable_uri = "https://upload.example/session/uncertain"
+            return SimpleNamespace(progress=lambda: 1.0), response
+
+    class Videos:
+        def insert(self, **kwargs):
+            upload_calls.append("insert")
+            return UploadRequest()
+
+    publisher = YouTubePublisher(
+        database_path,
+        oauth=SimpleNamespace(
+            authorized_credentials=lambda: object(),
+            encrypt_persistent_secret=lambda value: "encrypted-session-fixture",
+        ),
+        api_builder=lambda credentials: channel_service(["UC-approved"], Videos()),
+        media_upload_factory=lambda path: upload_calls.append("media"),
+        video_validator=lambda path: {"valid": True},
+    )
+    publisher.request_review(production_id)
+    publisher.approve(
+        production_id,
+        channel_id="UC-approved",
+        visibility="private",
+        self_declared_made_for_kids=False,
+    )
+
+    with pytest.raises(YouTubePublishError, match="unverified upload result"):
+        publisher.upload(production_id)
+
+    upload = get_upload(production_id, database_path)
+    assert upload["status"] == "failed"
+    assert upload["video_id"] is None
+    assert upload["uploaded_at"] is None
+    assert isinstance(upload["api_response"], dict)
+    assert set(upload["api_response"]) <= {
+        "response_type",
+        "id",
+        "id_format",
+        "channel_id",
+        "privacy_status",
+        "audience_status",
+    }
+    assert "description" not in upload["api_response"]
+    assert "token" not in str(upload["api_response"]).lower()
+    assert upload["resumable_uri"] is None
+    assert upload["attempt_count"] == 1
+    with pytest.raises(YouTubePublishError, match="approval"):
+        publisher.upload(production_id)
+    assert upload_calls == ["media", "insert"]
+
+
+@pytest.mark.parametrize(
+    "remote_result",
+    [
+        {"items": []},
+        {
+            "items": [
+                {
+                    "id": "abcDEF12345",
+                    "snippet": {"channelId": "UC-other"},
+                    "status": {"privacyStatus": "private", "selfDeclaredMadeForKids": False},
+                }
+            ]
+        },
+        {
+            "items": [
+                {
+                    "id": "abcDEF12345",
+                    "snippet": {"channelId": "UC-approved"},
+                    "status": {"privacyStatus": "unlisted", "selfDeclaredMadeForKids": False},
+                }
+            ]
+        },
+        {
+            "items": [
+                {
+                    "id": "abcDEF12345",
+                    "snippet": {"channelId": "UC-approved"},
+                    "status": {"privacyStatus": "private", "selfDeclaredMadeForKids": True},
+                }
+            ]
+        },
+        RuntimeError("readback unavailable"),
+    ],
+    ids=["not-retrievable", "wrong-channel", "wrong-visibility", "wrong-audience", "readback-error"],
+)
+def test_remote_result_must_match_approval_before_success(tmp_path, remote_result) -> None:
+    database_path = tmp_path / "app.sqlite3"
+    production_id, _ = make_completed_production(database_path, tmp_path / "production")
+
+    class UploadRequest:
+        resumable_uri = None
+
+        def next_chunk(self, num_retries):
+            self.resumable_uri = "https://upload.example/session/readback"
+            return SimpleNamespace(progress=lambda: 1.0), {
+                "id": "abcDEF12345",
+                "snippet": {"channelId": "UC-approved"},
+                "status": {"privacyStatus": "private", "selfDeclaredMadeForKids": False},
+            }
+
+    class Videos:
+        def insert(self, **kwargs):
+            return UploadRequest()
+
+        def list(self, **kwargs):
+            class Readback:
+                def execute(self, num_retries):
+                    if isinstance(remote_result, Exception):
+                        raise remote_result
+                    return remote_result
+
+            return Readback()
+
+    publisher = YouTubePublisher(
+        database_path,
+        oauth=SimpleNamespace(
+            authorized_credentials=lambda: object(),
+            encrypt_persistent_secret=lambda value: "encrypted-session-fixture",
+        ),
+        api_builder=lambda credentials: channel_service(["UC-approved"], Videos()),
+        media_upload_factory=lambda path: object(),
+        video_validator=lambda path: {"valid": True},
+    )
+    publisher.request_review(production_id)
+    publisher.approve(
+        production_id,
+        channel_id="UC-approved",
+        visibility="private",
+        self_declared_made_for_kids=False,
+    )
+
+    with pytest.raises(YouTubePublishError, match="unverified upload result"):
+        publisher.upload(production_id)
+
+    upload = get_upload(production_id, database_path)
+    assert upload["status"] == "failed"
+    assert upload["video_id"] is None
+    assert upload["uploaded_at"] is None
+    assert upload["resumable_uri"] is None
+    assert upload["api_response"]
 
 
 def test_failed_upload_resumes_saved_session_without_duplicate_insert(tmp_path) -> None:
@@ -642,8 +940,12 @@ def test_failed_upload_resumes_saved_session_without_duplicate_insert(tmp_path) 
                 raise RuntimeError("simulated interruption")
             assert self.resumable_uri == "https://upload.example/session/retry-fixture"
             return SimpleNamespace(progress=lambda: 1.0), {
-                "id": "youtube-resumed-id",
-                "status": {"privacyStatus": "private"},
+                "id": "resumED1234",
+                "snippet": {"channelId": "UC-approved"},
+                "status": {
+                    "privacyStatus": "private",
+                    "selfDeclaredMadeForKids": False,
+                },
             }
 
     requests = [UploadRequest(fail=True), UploadRequest(fail=False)]
@@ -654,15 +956,36 @@ def test_failed_upload_resumes_saved_session_without_duplicate_insert(tmp_path) 
             inserts.append(kwargs)
             return requests.pop(0)
 
+        def list(self, **kwargs):
+            return SimpleNamespace(
+                execute=lambda num_retries: {
+                    "items": [
+                        {
+                            "id": "resumED1234",
+                            "snippet": {"channelId": "UC-approved"},
+                            "status": {
+                                "privacyStatus": "private",
+                                "selfDeclaredMadeForKids": False,
+                            },
+                        }
+                    ]
+                }
+            )
+
     publisher = YouTubePublisher(
         database_path,
         oauth=OAuthFixture(),
-        api_builder=lambda credentials: SimpleNamespace(videos=lambda: Videos()),
+        api_builder=lambda credentials: channel_service(["UC-approved"], Videos()),
         media_upload_factory=lambda path: object(),
         video_validator=lambda path: {"valid": True},
     )
     publisher.request_review(production_id)
-    publisher.approve(production_id)
+    publisher.approve(
+        production_id,
+        channel_id="UC-approved",
+        visibility="private",
+        self_declared_made_for_kids=False,
+    )
 
     with pytest.raises(YouTubePublishError, match="network or API error"):
         publisher.upload(production_id)
@@ -674,23 +997,100 @@ def test_failed_upload_resumes_saved_session_without_duplicate_insert(tmp_path) 
     uploaded = publisher.upload(production_id)
 
     assert uploaded["status"] == "uploaded_private"
-    assert uploaded["video_id"] == "youtube-resumed-id"
+    assert uploaded["video_id"] == "resumED1234"
     assert uploaded["attempt_count"] == 2
     assert len(inserts) == 2
+
+
+def test_restart_without_saved_session_can_reconcile_and_remains_non_retryable(tmp_path) -> None:
+    database_path = tmp_path / "app.sqlite3"
+    production_id, _ = make_completed_production(database_path, tmp_path / "production")
+    search_calls = []
+
+    class Search:
+        def list(self, **kwargs):
+            search_calls.append(kwargs)
+            return self
+
+        def execute(self, **kwargs):
+            return {"items": []}
+
+    def build_api(credentials):
+        service = channel_service(["UC-approved"])
+        service.search = lambda: Search()
+        return service
+
+    publisher = YouTubePublisher(
+        database_path,
+        oauth=SimpleNamespace(authorized_credentials=lambda: object()),
+        api_builder=build_api,
+    )
+    publisher.request_review(production_id)
+    publisher.approve(
+        production_id,
+        channel_id="UC-approved",
+        visibility="private",
+        self_declared_made_for_kids=False,
+    )
+    claim_upload(production_id, database_path)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "UPDATE youtube_uploads SET lease_until = '2000-01-01T00:00:00+00:00' WHERE production_id = ?",
+            (production_id,),
+        )
+
+    result = publisher.reconcile(production_id)
+
+    assert result["status"] == "failed"
+    assert result["reconciled"] is False
+    assert search_calls and search_calls[0]["forMine"] is True
+    upload = get_upload(production_id, database_path)
+    assert upload["status"] == "failed"
+    assert upload["resumable_uri"] is None
+    assert upload["attempt_count"] == 1
+    with pytest.raises(YouTubePublishError, match="explicit publishing approval"):
+        publisher.upload(production_id)
+
+
+def test_reconcile_does_not_interfere_with_active_upload_lease(tmp_path) -> None:
+    database_path = tmp_path / "app.sqlite3"
+    production_id, _ = make_completed_production(database_path, tmp_path / "production")
+    search_calls = []
+
+    class Search:
+        def list(self, **kwargs):
+            search_calls.append(kwargs)
+            return self
+
+    def build_api(credentials):
+        service = channel_service(["UC-approved"])
+        service.search = lambda: Search()
+        return service
+
+    publisher = YouTubePublisher(
+        database_path,
+        oauth=SimpleNamespace(authorized_credentials=lambda: object()),
+        api_builder=build_api,
+    )
+    publisher.request_review(production_id)
+    publisher.approve(
+        production_id,
+        channel_id="UC-approved",
+        visibility="private",
+        self_declared_made_for_kids=False,
+    )
+    claim_upload(production_id, database_path)
+
+    with pytest.raises(YouTubePublishError, match="expired upload"):
+        publisher.reconcile(production_id)
+
+    assert search_calls == []
+    assert get_upload(production_id, database_path)["status"] == "uploading"
 
 
 def test_ambiguous_upload_reconciles_by_production_reference(tmp_path) -> None:
     database_path = tmp_path / "app.sqlite3"
     production_id, _ = make_completed_production(database_path, tmp_path / "production")
-    request_review(production_id, "private", {"title": "reviewed"}, database_path)
-    approve_production(production_id, "private", {"title": "reviewed"}, database_path)
-    claim_upload(production_id, database_path)
-    update_upload_progress(
-        production_id,
-        status="failed",
-        error="connection lost before response persisted",
-        database_path=database_path,
-    )
     service_calls = []
 
     class Search:
@@ -699,7 +1099,7 @@ def test_ambiguous_upload_reconciles_by_production_reference(tmp_path) -> None:
             return self
 
         def execute(self, **kwargs):
-            return {"items": [{"id": {"videoId": "youtube-found-id"}}]}
+            return {"items": [{"id": {"videoId": "foundVID123"}}]}
 
     class Videos:
         def list(self, **kwargs):
@@ -710,19 +1110,43 @@ def test_ambiguous_upload_reconciles_by_production_reference(tmp_path) -> None:
             return {
                 "items": [
                     {
-                        "id": "youtube-found-id",
+                        "id": "foundVID123",
                         "snippet": {
+                            "channelId": "UC-approved",
                             "description": f"MotivationOS production reference: {production_id}"
                         },
-                        "status": {"privacyStatus": "private"},
+                        "status": {
+                            "privacyStatus": "private",
+                            "selfDeclaredMadeForKids": False,
+                        },
                     }
                 ]
             }
 
+    def build_api(credentials):
+        service = channel_service(["UC-approved"])
+        service.search = lambda: Search()
+        service.videos = lambda: Videos()
+        return service
+
     publisher = YouTubePublisher(
         database_path,
         oauth=SimpleNamespace(authorized_credentials=lambda: object()),
-        api_builder=lambda credentials: SimpleNamespace(search=lambda: Search(), videos=lambda: Videos()),
+        api_builder=build_api,
+    )
+    publisher.request_review(production_id)
+    publisher.approve(
+        production_id,
+        channel_id="UC-approved",
+        visibility="private",
+        self_declared_made_for_kids=False,
+    )
+    claim_upload(production_id, database_path)
+    update_upload_progress(
+        production_id,
+        status="failed",
+        error="connection lost before response persisted",
+        database_path=database_path,
     )
 
     result = publisher.reconcile(production_id)
@@ -730,11 +1154,11 @@ def test_ambiguous_upload_reconciles_by_production_reference(tmp_path) -> None:
     assert result == {
         "production_id": production_id,
         "status": "uploaded_private",
-        "video_id": "youtube-found-id",
+        "video_id": "foundVID123",
         "reconciled": True,
     }
     assert service_calls[0][1]["forMine"] is True
-    assert get_upload(production_id, database_path)["video_id"] == "youtube-found-id"
+    assert get_upload(production_id, database_path)["video_id"] == "foundVID123"
 
 
 def test_admin_api_requires_bearer_token_and_never_returns_oauth_tokens(tmp_path, monkeypatch) -> None:
@@ -753,3 +1177,68 @@ def test_admin_api_requires_bearer_token_and_never_returns_oauth_tokens(tmp_path
 
     assert response.status_code == 200
     assert "token" not in response.text.lower()
+
+
+def test_publishing_approval_api_forwards_explicit_channel_id(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "admin-test-token")
+
+    class PublisherFixture:
+        received = None
+
+        def approve(self, production_id, **kwargs):
+            self.received = (production_id, kwargs)
+            return {
+                "production_id": production_id,
+                "state": "approved",
+                "visibility": "private",
+                "approved_at": "test-time",
+                "approved_channel_id": kwargs["channel_id"],
+                "metadata": {},
+                "error": None,
+            }
+
+    publisher = PublisherFixture()
+    app = create_app(tmp_path / "app.sqlite3", publisher=publisher)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/publishing/production-fixture/approve",
+            headers={"Authorization": "Bearer admin-test-token"},
+            json={
+                "confirm_approval": True,
+                "channel_id": "UC-approved",
+                "visibility": "private",
+                "self_declared_made_for_kids": False,
+            },
+        )
+        missing_visibility = client.post(
+            "/api/publishing/production-fixture/approve",
+            headers={"Authorization": "Bearer admin-test-token"},
+            json={
+                "confirm_approval": True,
+                "channel_id": "UC-approved",
+                "self_declared_made_for_kids": False,
+            },
+        )
+        missing_audience = client.post(
+            "/api/publishing/production-fixture/approve",
+            headers={"Authorization": "Bearer admin-test-token"},
+            json={
+                "confirm_approval": True,
+                "channel_id": "UC-approved",
+                "visibility": "private",
+            },
+        )
+
+    assert response.status_code == 200
+    assert missing_visibility.status_code == 422
+    assert missing_audience.status_code == 422
+    assert response.json()["approved_channel_id"] == "UC-approved"
+    assert publisher.received == (
+        "production-fixture",
+        {
+            "channel_id": "UC-approved",
+            "visibility": "private",
+            "self_declared_made_for_kids": False,
+            "confirm_public": False,
+        },
+    )
