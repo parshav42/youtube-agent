@@ -8,6 +8,7 @@
   const video = byId("video");
   let reviewToken = "";
   let productionId = "";
+  let pipelinePoll = null;
 
   function showError(message) {
     error.textContent = message;
@@ -25,6 +26,7 @@
     content.hidden = true;
     byId("signout").hidden = true;
     byId("refresh-review").disabled = true;
+    byId("run-daily-pipeline").disabled = true;
     clearVideo();
     showError(message);
   }
@@ -67,6 +69,50 @@
     }
     return response.status === 204 ? null : payload;
   }
+
+  async function runDailyPipeline() {
+    const section = byId("daily-pipeline-status");
+    section.hidden = false;
+    byId("daily-pipeline-progress").textContent = "Starting pipeline…";
+    byId("daily-pipeline-summary").textContent = "";
+    byId("run-daily-pipeline").disabled = true;
+    try {
+      const started = await request("/api/daily-pipeline", { method: "POST" });
+      const poll = async () => {
+        const job = await request(`/api/daily-pipeline/${encodeURIComponent(started.job_id)}`);
+        byId("daily-pipeline-progress").textContent = `${job.step || "Running"}: ${job.status}`;
+        if (job.status === "running") return;
+        clearInterval(pipelinePoll);
+        pipelinePoll = null;
+        byId("run-daily-pipeline").disabled = false;
+        if (job.status === "complete" && job.result) {
+          const r = job.result;
+          byId("daily-pipeline-summary").textContent = [
+            "============================================================", "DAILY PIPELINE COMPLETE",
+            "============================================================", `Script ID:     ${r.script_id}`,
+            `Title:         ${r.title}`, `Duration:      ${r.duration}`, `Production ID: ${r.production_id}`,
+            `Package path:  ${r.package_path}`, `Video file:    ${r.video_path}`,
+            "", "NEXT STEP (manual):", `1. Open ${r.package_path}`, "2. Upload final.mp4 to YouTube Studio",
+            '3. Set visibility to Public, "Not made for kids"', "4. Copy title/description/tags from the .txt files",
+            "5. Paste the YouTube URL back into the dashboard: http://127.0.0.1:8000/production-review",
+            "============================================================"
+          ].join("\n");
+        } else {
+          byId("daily-pipeline-summary").textContent = `DAILY PIPELINE FAILED: ${job.step}\nReason: ${job.error}${job.resume ? `\nResume: ${job.resume}` : ""}`;
+        }
+      };
+      await poll();
+      if (!pipelinePoll) pipelinePoll = setInterval(() => poll().catch((error) => {
+        clearInterval(pipelinePoll); pipelinePoll = null;
+        byId("daily-pipeline-progress").textContent = error.message;
+        byId("run-daily-pipeline").disabled = false;
+      }), 5000);
+    } catch (cause) {
+      byId("daily-pipeline-progress").textContent = cause instanceof Error ? cause.message : "Pipeline could not start.";
+      byId("run-daily-pipeline").disabled = false;
+    }
+  }
+  byId("run-daily-pipeline").addEventListener("click", runDailyPipeline);
 
   function renderFindings(list, values) {
     list.replaceChildren();
@@ -164,6 +210,7 @@
       const data = await request(`/api/productions/${encodeURIComponent(productionId)}/review`);
       renderReview(data);
       content.hidden = false;
+      byId("run-daily-pipeline").disabled = false;
     } catch (cause) {
       if (cause.authFailure) showAuth(cause.message);
       else showError(cause instanceof Error ? cause.message : "Review request failed.");

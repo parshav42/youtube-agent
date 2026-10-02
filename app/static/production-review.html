@@ -17,6 +17,7 @@
         <p>Audio review and production approval are separate decisions. Upload the finished video manually on YouTube.</p>
       </div>
       <div class="production-header-actions">
+        <button id="run-daily-pipeline" class="button button-primary" type="button" disabled>Run daily pipeline</button>
         <button id="refresh-review" class="button button-quiet" type="button" disabled>Refresh review</button>
         <button id="signout" class="button button-quiet" type="button" hidden>Sign out</button>
       </div>
@@ -30,6 +31,9 @@
       <button class="button button-primary" type="submit">Load review</button>
     </form>
     <p id="error" class="production-error" role="alert" aria-live="polite"></p>
+    <section id="daily-pipeline-status" class="production-section" aria-live="polite" hidden>
+      <h2>Daily pipeline</h2><p id="daily-pipeline-progress">Ready</p><pre id="daily-pipeline-summary"></pre>
+    </section>
 
     <main id="content" hidden>
       <section class="production-section production-preview">

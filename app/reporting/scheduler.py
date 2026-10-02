@@ -1,6 +1,7 @@
 """Opt-in persistent daily analytics/report scheduler."""
 
 import os
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -18,6 +19,8 @@ from app.youtube.repository import claim_job, finish_job
 JOB_NAME = "daily-youtube-analytics-report"
 AUTO_PUBLISH_JOB_NAME = "youtube-auto-publish"
 AUTO_MATCH_JOB_NAME = "youtube-upload-auto-match"
+DAILY_PIPELINE_JOB_NAME = "motivationos-daily-pipeline"
+logger = logging.getLogger(__name__)
 
 
 def run_scheduled_report(
@@ -59,6 +62,19 @@ def build_scheduler(database_path: str | None = None) -> BackgroundScheduler:
         misfire_grace_time=3600,
     )
     auto_settings = get_auto_publish_settings()
+    from app.config import get_daily_pipeline_settings
+    pipeline_cron = str(get_daily_pipeline_settings()["cron"])
+    if pipeline_cron:
+        try:
+            pipeline_trigger = CronTrigger.from_crontab(pipeline_cron, timezone="UTC")
+        except ValueError as error:
+            raise ValueError("DAILY_PIPELINE_CRON must be a valid five-field cron expression.") from error
+        scheduler.add_job(
+            run_scheduled_daily_pipeline, trigger=pipeline_trigger,
+            id=DAILY_PIPELINE_JOB_NAME,
+            kwargs={"database_path": database_path or str(get_database_path())},
+            replace_existing=True, max_instances=1, coalesce=True, misfire_grace_time=3600,
+        )
     if auto_settings["enabled"]:
         try:
             auto_trigger = CronTrigger.from_crontab(
@@ -91,6 +107,20 @@ def build_scheduler(database_path: str | None = None) -> BackgroundScheduler:
             misfire_grace_time=3600,
         )
     return scheduler
+
+
+def run_scheduled_daily_pipeline(*, database_path: str | None = None) -> dict[str, Any]:
+    """Run and log one opt-in full pipeline attempt; upload remains manual."""
+    path = database_path or str(get_database_path())
+    run_key = datetime.now(timezone.utc).isoformat()
+    try:
+        from app.daily_pipeline import run_daily_pipeline
+        result = run_daily_pipeline(path)
+    except Exception as error:
+        logger.exception("Scheduled daily pipeline failed timestamp=%s", run_key)
+        return {"status": "failed", "timestamp": run_key, "error": str(error)}
+    logger.info("Scheduled daily pipeline completed timestamp=%s production_id=%s", run_key, result["production_id"])
+    return {"status": "completed", "timestamp": run_key, "result": result}
 
 
 def run_scheduled_auto_publish(

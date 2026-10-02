@@ -61,6 +61,7 @@ def main() -> int:
         metavar="PRODUCTION_ID",
         help="Export a finished production and its YouTube metadata for manual upload.",
     )
+    modes.add_argument("--run-daily-pipeline", action="store_true", help="Run script generation through upload-package export; YouTube upload stays manual.")
     modes.add_argument(
         "--approve-script", type=int, metavar="SCRIPT_ID", help="Record explicit human approval of a passing script."
     )
@@ -85,6 +86,45 @@ def main() -> int:
         return check_huggingface()
     database_path = get_database_path()
     initialize_database(database_path)
+
+    if args.run_daily_pipeline:
+        from app.daily_pipeline import DailyPipelineError, run_daily_pipeline
+        try:
+            result = run_daily_pipeline(database_path)
+        except DailyPipelineError as error:
+            print("=" * 60, file=sys.stderr)
+            print(f"DAILY PIPELINE FAILED: {error.step}", file=sys.stderr)
+            print(f"Reason: {error}", file=sys.stderr)
+            print("Resume guidance:", file=sys.stderr)
+            if error.production_id:
+                print(f"  Production ID: {error.production_id}", file=sys.stderr)
+                print(f"  Resume: python -m app.main --resume-production {error.production_id}", file=sys.stderr)
+                print(f"  Export after approval: python -m app.main --export-upload-package {error.production_id}", file=sys.stderr)
+            elif error.script_id:
+                print(f"  Script ID: {error.script_id}; review it, then continue with --generate-images and --produce-script.", file=sys.stderr)
+            print("=" * 60, file=sys.stderr)
+            return 1
+        except Exception as error:
+            print(f"DAILY PIPELINE FAILED: configuration or unexpected error: {error}", file=sys.stderr)
+            return 1
+        print("=" * 60)
+        print("DAILY PIPELINE COMPLETE")
+        print("=" * 60)
+        print(f"Script ID:     {result['script_id']}")
+        print(f"Title:         {result['title']}")
+        print(f"Duration:      {result['duration']}")
+        print(f"Production ID: {result['production_id']}")
+        print(f"Package path:  {result['package_path']}")
+        print(f"Video file:    {result['video_path']}")
+        print("\nNEXT STEP (manual):")
+        print(f"  1. Open {result['package_path']}")
+        print("  2. Upload final.mp4 to YouTube Studio")
+        print('  3. Set visibility to Public, "Not made for kids"')
+        print("  4. Copy title/description/tags from the .txt files")
+        print("  5. Paste the YouTube URL back into the dashboard:")
+        print("     http://127.0.0.1:8000/production-review")
+        print("=" * 60)
+        return 0
 
     if args.produce_script is not None:
         return produce_script(args.produce_script, database_path, debug=args.debug)
