@@ -102,6 +102,15 @@ def test_production_generates_images_manifest_and_reuses_them_on_resume(
     database_path = tmp_path / "scripts.sqlite3"
     script = _approved_script(database_path)
     library = tmp_path / "licensed-assets"
+    library.mkdir()
+    manual_entry = {
+        "source": "Local creator",
+        "license": "CC-BY-4.0",
+        "rights_holder": "Creator",
+    }
+    (library / "LICENSES.json").write_text(
+        json.dumps({"manual_asset.jpg": manual_entry}), encoding="utf-8"
+    )
     provider = StubImageProvider()
     assembler = RetryingAssembler()
     monkeypatch.setenv("IMAGE_PROVIDER", "pollinations")
@@ -132,7 +141,8 @@ def test_production_generates_images_manifest_and_reuses_them_on_resume(
 
     manifest_path = library / "LICENSES.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert len(manifest) == len(script.scenes)
+    assert len(manifest) == len(script.scenes) + 1
+    assert manifest["manual_asset.jpg"] == manual_entry
     for scene in script.scenes:
         filename = f"scene_{scene.scene_number:02d}.png"
         assert (library / filename).is_file()
@@ -219,3 +229,42 @@ def test_generate_images_cli_reports_partial_files_and_manifest(tmp_path, monkey
     assert f"Wrote image: {library / 'scene_01.png'}" in output.out
     assert f"LICENSES.json: {library / 'LICENSES.json'}" in output.out
     assert "Scene 2 image generation failed" in output.err
+
+
+def test_regenerate_image_cli_forces_only_the_requested_scene(tmp_path, monkeypatch, capsys):
+    database_path = tmp_path / "scripts.sqlite3"
+    script = MockScriptGenerator().generate(ScriptRequest(topic="discipline"))
+    record = save_script(
+        script,
+        evaluation=evaluate_script(script),
+        database_path=database_path,
+    )
+    library = tmp_path / "assets"
+    library.mkdir()
+    (library / "scene_02.png").write_bytes(_png_bytes())
+
+    class RegenerationProvider:
+        provider_name = "Pollinations AI test stub"
+        model = "flux-test"
+
+        def __init__(self):
+            self.prompts = []
+
+        def generate(self, prompt, output_path):
+            self.prompts.append(prompt)
+            Path(output_path).with_suffix(".png").write_bytes(_png_bytes())
+
+    provider = RegenerationProvider()
+    monkeypatch.setenv("IMAGE_PROVIDER", "pollinations")
+    monkeypatch.setattr(cli, "get_licensed_asset_path", lambda: library)
+    monkeypatch.setattr(cli, "build_image_provider", lambda: provider)
+
+    exit_code = cli.generate_images(
+        record["id"], str(database_path), scene_number=2, force=True
+    )
+
+    output = capsys.readouterr()
+    assert exit_code == 0
+    assert provider.prompts == [script.scenes[1].visual_description]
+    assert f"Wrote image: {library / 'scene_02.png'}" in output.out
+    assert "scene_01" not in output.out

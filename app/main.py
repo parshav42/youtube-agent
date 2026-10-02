@@ -253,11 +253,12 @@ def generate_images(
     if record is None:
         print(f"Script record {script_id} was not found.", file=sys.stderr)
         return 1
+    library = get_licensed_asset_path()
     try:
         script = MotivationalScript.model_validate(record["script"])
         provider = build_image_provider()
-        library = get_licensed_asset_path()
     except (ImageGenerationError, ValueError) as error:
+        print(f"LICENSES.json: {library / 'LICENSES.json'}")
         print(f"Image generation failed: {error}", file=sys.stderr)
         return 1
     selected_scenes = [
