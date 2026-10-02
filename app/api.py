@@ -2,6 +2,7 @@
 
 import hmac
 import json
+import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
@@ -19,12 +20,14 @@ from app.config import (
     get_auto_publish_settings,
     get_database_path,
     get_youtube_auto_match_enabled,
+    get_production_output_path,
 )
 from app.database.db import (
     ScriptNotFoundError,
     ScriptReviewError,
     get_script_by_id,
     get_production_by_id,
+    get_productions,
     get_scripts_needing_review,
     review_script,
     update_production,
@@ -39,6 +42,26 @@ from app.youtube.repository import get_upload, initialize_youtube_database, link
 from app.video.review_gates import production_qa_allows_approval, video_sha256
 
 _bearer = HTTPBearer(auto_error=False)
+logger = logging.getLogger(__name__)
+
+
+class ProductionArtifactFiles(StaticFiles):
+    """Serve only public review artifacts from production output directories."""
+
+    async def get_response(self, path: str, scope: dict[str, Any]):
+        parts = Path(path).parts
+        allowed = (
+            len(parts) == 2 and parts[1] == "final.mp4"
+        ) or (
+            len(parts) == 2 and parts[1].lower().startswith("thumbnail")
+            and Path(parts[1]).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+        ) or (
+            len(parts) >= 3 and parts[1] == "upload_package"
+        )
+        if not allowed or any(part in {".", ".."} for part in parts):
+            from starlette.responses import PlainTextResponse
+            return PlainTextResponse("Not found", status_code=404)
+        return await super().get_response(path, scope)
 
 
 class ReviewRequest(BaseModel):
@@ -132,6 +155,11 @@ def create_app(
     application.mount(
         "/review-assets", StaticFiles(directory=static_directory), name="review-assets"
     )
+    application.mount(
+        "/media/productions",
+        ProductionArtifactFiles(directory=get_production_output_path()),
+        name="productions-media",
+    )
 
     @application.get("/review", include_in_schema=False)
     def review_dashboard() -> FileResponse:
@@ -151,7 +179,7 @@ def create_app(
     @application.get("/production-review", include_in_schema=False)
     def production_review_page() -> FileResponse:
         return FileResponse(static_directory / "production-review.html", headers={
-            "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+            "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' blob: data:; media-src 'self' blob: data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
             "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
         })
 
@@ -165,6 +193,42 @@ def create_app(
         if not hmac.compare_digest(supplied, expected):
             raise HTTPException(status_code=401, detail="Administrative authorization required.")
 
+    @application.get("/api/productions", dependencies=[Depends(require_admin)])
+    def productions_list() -> list[dict[str, Any]]:
+        included_statuses = {
+            "failed", "needs_review", "ready_for_manual_upload", "published",
+            "completed", "approved",
+        }
+        results = []
+        for production in get_productions(resolved_path):
+            output_root = Path(production["output_dir"]).resolve()
+            if production["status"] not in included_statuses or not (output_root / "final.mp4").is_file():
+                continue
+            upload = get_upload(production["id"], resolved_path)
+            results.append({
+                "production_id": production["id"],
+                "status": production["status"],
+                "video_url": f"/media/productions/{production['id']}/final.mp4",
+                "video_exists": True,
+                "manual_upload_url": upload.get("video_url") if upload else None,
+            })
+        return results
+
+    @application.get("/api/productions/{production_id}", dependencies=[Depends(require_admin)])
+    def production_detail(production_id: str) -> dict[str, Any]:
+        production = get_production_by_id(production_id, resolved_path)
+        if production is None:
+            raise HTTPException(status_code=404, detail="Production was not found.")
+        video_exists = (Path(production["output_dir"]).resolve() / "final.mp4").is_file()
+        upload = get_upload(production_id, resolved_path)
+        return {
+            "production_id": production_id,
+            "status": production["status"],
+            "video_url": f"/media/productions/{production_id}/final.mp4",
+            "video_exists": video_exists,
+            "manual_upload_url": upload.get("video_url") if upload else None,
+        }
+
     @application.get("/api/productions/{production_id}/review", dependencies=[Depends(require_admin)])
     def production_review(production_id: str) -> dict[str, Any]:
         production = get_production_by_id(production_id, resolved_path)
@@ -175,6 +239,8 @@ def create_app(
             raise HTTPException(status_code=404, detail="Production script was not found.")
         meta = production["metadata"]
         upload = get_upload(production_id, resolved_path)
+        output_root = Path(production["output_dir"]).resolve()
+        video_exists = (output_root / "final.mp4").is_file()
         return {
             "id": production["id"], "status": production["status"],
             "error": production["error"], "script": script["script"],
@@ -183,8 +249,10 @@ def create_app(
             "audio_qa": meta.get("audio_qa"), "video_qa": meta.get("video_qa"),
             "audio_review_decision": meta.get("audio_review_decision"),
             "youtube_url": upload.get("video_url") if upload else None,
+            "manual_upload_url": upload.get("video_url") if upload else None,
+            "video_exists": video_exists,
             "findings": [*(meta.get("audio_qa") or {}).get("findings", []), *(meta.get("video_qa") or {}).get("findings", [])],
-            "video_url": f"/api/productions/{production_id}/video",
+            "video_url": f"/media/productions/{production_id}/final.mp4",
         }
 
     @application.get("/api/productions/{production_id}/video", dependencies=[Depends(require_admin)])
@@ -207,6 +275,10 @@ def create_app(
         record = get_production_by_id(production_id, resolved_path)
         if record is None:
             raise HTTPException(status_code=404, detail="Production was not found.")
+        if decision == "approve" and record["metadata"].get("review_decision", {}).get("decision") == "approve":
+            logger.info("Production approval already recorded production_id=%s", production_id)
+            return {"production_id": production_id, "status": "already_approved"}
+        logger.info("Production review decision received production_id=%s decision=%s", production_id, decision)
         if record["status"] not in {"needs_review", "completed", "ready_for_manual_upload"}:
             raise HTTPException(status_code=409, detail="Production is not available for review.")
         if record["metadata"].get("review_decision"):

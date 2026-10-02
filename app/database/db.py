@@ -479,3 +479,13 @@ def get_production_by_id(
             "SELECT * FROM productions WHERE id = ?", (production_id,)
         ).fetchone()
     return _decode_production(row)
+
+
+def get_productions(database_path: str | Path | None = None) -> list[dict[str, Any]]:
+    """Retrieve production records newest first."""
+    initialize_database(database_path)
+    with _connection(database_path) as connection:
+        rows = connection.execute(
+            "SELECT * FROM productions ORDER BY created_at DESC, id DESC"
+        ).fetchall()
+    return [record for row in rows if (record := _decode_production(row)) is not None]
