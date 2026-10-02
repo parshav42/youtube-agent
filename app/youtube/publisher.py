@@ -530,7 +530,7 @@ class YouTubePublisher:
             raise YouTubePublishError("Production was not found.")
         if production["status"] not in {"completed", "ready_for_manual_upload"}:
             raise YouTubePublishError(
-                "Only completed or ready_for_manual_upload productions can be published."
+                "Only completed productions or ready_for_manual_upload productions can be published."
             )
         metadata = production.get("metadata")
         if not isinstance(metadata, dict) or not has_recorded_decision(

@@ -129,7 +129,7 @@
     byId("description").textContent = data.description || "Description unavailable";
     byId("status").textContent = data.status || "Status unavailable";
     const manualUploadSection = byId("manual-upload-link");
-    manualUploadSection.hidden = !["ready_for_manual_upload", "published"].includes(data.status);
+    manualUploadSection.hidden = !["ready_for_manual_upload", "completed", "published"].includes(data.status);
     byId("youtube-url").value = data.youtube_url || "";
     byId("manual-upload-status").textContent = data.status === "published"
       ? "YouTube video linked."

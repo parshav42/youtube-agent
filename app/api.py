@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from app.config import (
+    get_auto_publish_enabled,
     get_auto_publish_settings,
     get_database_path,
     get_youtube_auto_match_enabled,
@@ -427,7 +428,7 @@ def create_app(
         "/api/publishing/{production_id}/upload", dependencies=[Depends(require_admin)]
     )
     def publishing_upload(production_id: str) -> dict[str, Any]:
-        if not get_auto_publish_settings()["enabled"]:
+        if not get_auto_publish_enabled():
             raise HTTPException(
                 status_code=403,
                 detail="YouTube API uploads are disabled. Set AUTO_PUBLISH_ENABLED=true to re-enable them.",
