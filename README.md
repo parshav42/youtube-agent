@@ -192,6 +192,17 @@ python -m app.main --topic "Consistency during exam season" --duration 35
 
 Every generated script is saved as `needs_review`, even when its automated quality evaluation passes. A passing evaluation makes it eligible for human review; it is not approval. The `--draft-for-review` flag remains as a deprecated compatibility option.
 
+`MIN_SCRIPT_QUALITY_SCORE` sets the quality threshold used for script evaluation (default `7.5`); the same setting is used by the publishing quality gate. The legacy `MOTIVATIONOS_QUALITY_THRESHOLD` remains a fallback when `MIN_SCRIPT_QUALITY_SCORE` is unset. Lowering the threshold does not bypass any of the eleven required evaluation checks.
+
+Approve a passing script from the CLI after a person has reviewed it:
+
+```bash
+python -m app.main --approve-script 5 --reviewer "Your Name"
+python -m app.main --produce-script 5
+```
+
+The approval command uses the same atomic database review operation as the authenticated dashboard API. It writes `status`, `reviewed_at`, and `reviewed_by` together, and refuses scripts without a valid passing evaluation. Already-reviewed records cannot be reviewed again. Add `--debug` to a production command to re-raise workflow-caught exceptions with a traceback; errors from stages that create a production record are reported in that record.
+
 Use the authenticated local API to review scripts:
 
 - `GET /api/scripts/review` lists scripts awaiting review.

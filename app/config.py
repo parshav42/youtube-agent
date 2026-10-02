@@ -38,13 +38,17 @@ def get_topic(override: str | None = None) -> str:
 
 
 def get_quality_threshold() -> float:
-    """Return the configured heuristic quality threshold."""
+    """Return the configured script quality threshold."""
+    value = os.getenv(
+        "MIN_SCRIPT_QUALITY_SCORE",
+        os.getenv("MOTIVATIONOS_QUALITY_THRESHOLD", "7.5"),
+    )
     try:
-        threshold = float(os.getenv("MOTIVATIONOS_QUALITY_THRESHOLD", "7.5"))
+        threshold = float(value)
     except ValueError as error:
-        raise ValueError("MOTIVATIONOS_QUALITY_THRESHOLD must be a number from 0 to 10.") from error
+        raise ValueError("MIN_SCRIPT_QUALITY_SCORE must be a number from 0 to 10.") from error
     if not 0 <= threshold <= 10:
-        raise ValueError("MOTIVATIONOS_QUALITY_THRESHOLD must be between 0 and 10.")
+        raise ValueError("MIN_SCRIPT_QUALITY_SCORE must be between 0 and 10.")
     return threshold
 
 

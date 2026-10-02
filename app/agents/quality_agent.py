@@ -165,6 +165,11 @@ def evaluate_script(
         for name, passed in checks.items()
         if not passed
     ]
+    if not checks["language_consistency"]:
+        feedback[0] = (
+            "Rewrite the narration as natural Hinglish with meaningful romanized Hindi and English; "
+            "do not merely label an English script as Hinglish."
+        )
     feedback.extend(llm_feedback)
     return ScriptEvaluation(
         quality_score=score,

@@ -7,7 +7,13 @@ from typing import Any
 
 from app.agents.research_agent import HuggingFaceResearchProvider
 from app.config import get_database_path, get_niche, get_quality_threshold, get_topic
-from app.database.db import get_latest_research, initialize_database
+from app.database.db import (
+    ScriptNotFoundError,
+    ScriptReviewError,
+    get_latest_research,
+    initialize_database,
+    review_script,
+)
 from app.graph.workflow import build_workflow
 from app.providers.huggingface_llm import HuggingFaceLLMProvider
 from app.providers.llm_factory import build_llm_provider
@@ -37,6 +43,13 @@ def main() -> int:
     modes.add_argument(
         "--resume-production", metavar="PRODUCTION_ID", help="Resume a failed production whose source script remains approved."
     )
+    modes.add_argument(
+        "--approve-script", type=int, metavar="SCRIPT_ID", help="Record explicit human approval of a passing script."
+    )
+    parser.add_argument("--reviewer", help="Human reviewer name required with --approve-script.")
+    parser.add_argument(
+        "--debug", action="store_true", help="Re-raise exceptions caught by the video production workflow."
+    )
     parser.add_argument("--niche", help="Research niche for either research mode.")
     args = parser.parse_args()
 
@@ -46,9 +59,14 @@ def main() -> int:
     initialize_database(database_path)
 
     if args.produce_script is not None:
-        return produce_script(args.produce_script, database_path)
+        return produce_script(args.produce_script, database_path, debug=args.debug)
     if args.resume_production:
-        return resume_production(args.resume_production, database_path)
+        return resume_production(args.resume_production, database_path, debug=args.debug)
+    if args.approve_script is not None:
+        if not args.reviewer or not args.reviewer.strip():
+            print("--reviewer is required with --approve-script.", file=sys.stderr)
+            return 2
+        return approve_script(args.approve_script, args.reviewer, database_path)
     if args.research or args.research_with_hf:
         research_provider = None
         if args.research_with_hf:
@@ -135,27 +153,78 @@ def check_huggingface() -> int:
     return 0
 
 
-def produce_script(script_id: int, database_path: str) -> int:
+def produce_script(script_id: int, database_path: str, *, debug: bool = False) -> int:
     """Run a real production attempt and report its persisted status."""
     workflow = build_workflow(database_path=database_path)
-    result = workflow.invoke({"production_script_id": script_id}).get("production_result")
+    state = workflow.invoke({"production_script_id": script_id, "debug": debug})
+    result = state.get("production_result")
     if result is None:
-        print(f"Unable to start production for script {script_id}.", file=sys.stderr)
+        errors = state.get("errors", [])
+        if errors:
+            for error in errors:
+                print(_format_production_error(str(error)), file=sys.stderr)
+        else:
+            print(
+                f"Production blocked: workflow returned no result for script {script_id} and no diagnostic.",
+                file=sys.stderr,
+            )
         return 1
     return print_production(result)
 
 
-def resume_production(production_id: str, database_path: str) -> int:
+def resume_production(production_id: str, database_path: str, *, debug: bool = False) -> int:
     """Resume a previously failed production using its saved intermediate files."""
     try:
         workflow = build_workflow(database_path=database_path)
-        result = workflow.invoke({"resume_production_id": production_id}).get("production_result")
+        state = workflow.invoke({"resume_production_id": production_id, "debug": debug})
+        result = state.get("production_result")
         if result is None:
-            raise RuntimeError("The production workflow returned no result.")
+            errors = state.get("errors", [])
+            if errors:
+                for error in errors:
+                    print(_format_production_error(str(error)), file=sys.stderr)
+                return 1
+            raise RuntimeError("The production workflow returned no result and no diagnostic.")
     except Exception as error:
+        if debug:
+            raise
         print(f"Unable to resume production: {error}", file=sys.stderr)
         return 1
     return print_production(result)
+
+
+def approve_script(script_id: int, reviewer: str, database_path: str) -> int:
+    """Use the same transactional, passing-evaluation review path as the API."""
+    try:
+        record = review_script(
+            script_id, "approved", reviewer=reviewer, database_path=database_path
+        )
+    except (ScriptNotFoundError, ScriptReviewError, ValueError) as error:
+        print(f"Unable to approve script {script_id}: {error}", file=sys.stderr)
+        return 1
+    print(f"Script ID: {record['id']}")
+    print(f"Status: {record['status']}")
+    print(f"Reviewed by: {record['reviewed_by']}")
+    print(f"Reviewed at: {record['reviewed_at']}")
+    return 0
+
+
+def _format_production_error(error: str) -> str:
+    """Add a practical next step to known local production prerequisites."""
+    if "MOTIVATIONOS_TTS_PROVIDER must explicitly select" in error:
+        return (
+            "Production blocked: select MOTIVATIONOS_TTS_PROVIDER=edge-tts, or configure "
+            "MOTIVATIONOS_TTS_PROVIDER=elevenlabs with ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID."
+        )
+    if "Licensed visual library unavailable" in error:
+        return f"Production blocked: {error}"
+    if "No supported licensed image found for scene" in error:
+        return f"Production blocked: {error} Add a licensed image for every scene and update LICENSES.json."
+    if "needs source, license, and rights_holder metadata" in error:
+        return f"Production blocked: {error} Update LICENSES.json with complete provenance."
+    if "Required media tool(s) unavailable" in error:
+        return f"Production blocked: {error}"
+    return f"Production blocked: {error}"
 
 
 def print_production(record: dict[str, Any]) -> int:
@@ -169,7 +238,7 @@ def print_production(record: dict[str, Any]) -> int:
         print(json.dumps(record["metadata"]["video"], ensure_ascii=False, indent=2))
         return 0
     if record.get("error"):
-        print(f"Error: {record['error']}", file=sys.stderr)
+        print(_format_production_error(str(record["error"])), file=sys.stderr)
     print(f"Intermediate metadata: {record['output_dir']}/metadata.json")
     print(f"Resume with: python -m app.main --resume-production {record['id']}")
     return 1
