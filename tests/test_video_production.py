@@ -280,7 +280,7 @@ def test_tts_provider_refuses_existing_output_without_calling_service(
 def test_production_failure_persists_audio_and_resume_renders_playable_mp4(tmp_path, monkeypatch) -> None:
     database_path = tmp_path / "production.sqlite3"
     monkeypatch.setenv("IMAGE_PROVIDER", "manual")
-    monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "temporary-review-token")
+    monkeypatch.setenv("ADMIN_PASSWORD", "temporary-review-token")
     monkeypatch.setenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false")
     script = MockScriptGenerator().generate(ScriptRequest(topic="discipline"))
     evaluation = evaluate_script(script)
@@ -340,9 +340,9 @@ def test_production_failure_persists_audio_and_resume_renders_playable_mp4(tmp_p
     from fastapi import HTTPException
     from fastapi.security import HTTPAuthorizationCredentials
     with pytest.raises(HTTPException) as unauthorized:
-        require_admin(credentials=None)
+        require_admin(credentials=None, x_admin_password=None, request=None)
     assert unauthorized.value.status_code == 401
-    assert require_admin(credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials="temporary-review-token")) is None
+    assert require_admin(credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials="temporary-review-token"), x_admin_password=None, request=None) is None
     script_route = next(route for route in application.routes if getattr(route, "path", None) == "/api/scripts/{script_id}/review")
     assert script_route.endpoint(script_id)["script"] == script.model_dump(mode="json")
 

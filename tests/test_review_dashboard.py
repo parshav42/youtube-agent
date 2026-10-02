@@ -5,10 +5,12 @@ from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from fastapi.security import HTTPAuthorizationCredentials
 
 from app.api import create_app
 from app.agents.script_agent import MockScriptGenerator
+from app.config import get_admin_password
 from app.database.db import create_production, save_script, update_production
 from app.schemas.script_schema import ScriptRequest
 from app.youtube.repository import initialize_youtube_database
@@ -17,7 +19,7 @@ from app.youtube.repository import initialize_youtube_database
 def test_review_dashboard_serves_static_assets_without_weakening_api_auth(
     tmp_path, monkeypatch
 ) -> None:
-    monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "dashboard-test-token")
+    monkeypatch.setenv("ADMIN_PASSWORD", "dashboard-test-token")
     monkeypatch.setenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false")
     application = create_app(tmp_path / "dashboard.sqlite3")
     page_route = next(route for route in application.routes if getattr(route, "path", None) == "/review")
@@ -39,9 +41,79 @@ def test_review_dashboard_serves_static_assets_without_weakening_api_auth(
     review_route = next(route for route in application.routes if getattr(route, "path", None) == "/api/scripts/review")
     require_admin = review_route.dependant.dependencies[0].call
     with pytest.raises(HTTPException) as unauthorized:
-        require_admin(credentials=None)
+        require_admin(credentials=None, x_admin_password=None, request=None)
     assert unauthorized.value.status_code == 401
-    assert require_admin(credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials="dashboard-test-token")) is None
+    assert require_admin(credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials="dashboard-test-token"), x_admin_password=None, request=None) is None
+
+
+def test_admin_password_header_and_bearer_authentication(tmp_path, monkeypatch):
+    monkeypatch.setenv("ADMIN_PASSWORD", "dashboard-password")
+    application = create_app(tmp_path / "password-auth.sqlite3")
+    client = TestClient(application, client=("198.51.100.10", 8000))
+
+    missing = client.get("/api/auth/validate")
+    wrong = client.get(
+        "/api/auth/validate", headers={"X-Admin-Password": "incorrect-password"}
+    )
+    correct_header = client.get(
+        "/api/auth/validate", headers={"X-Admin-Password": "dashboard-password"}
+    )
+    correct_bearer = client.get(
+        "/api/auth/validate",
+        headers={"Authorization": "Bearer dashboard-password"},
+    )
+
+    assert missing.status_code == 401
+    assert missing.json() == {"detail": "Password required"}
+    assert wrong.status_code == 401
+    assert wrong.json() == {"detail": "Invalid password"}
+    assert correct_header.status_code == 200
+    assert correct_header.json() == {"authenticated": True}
+    assert correct_bearer.status_code == 200
+
+
+def test_legacy_admin_token_fallback_and_wrong_attempt_rate_limit(tmp_path, monkeypatch):
+    for name in (
+        "ADMIN_PASSWORD",
+        "MOTIVATIONOS_ADMIN_PASSWORD",
+        "MOTIVATIONOS_ADMIN_TOKEN",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ADMIN_TOKEN", "legacy-password")
+    assert get_admin_password() == "legacy-password"
+
+    application = create_app(tmp_path / "legacy-auth.sqlite3")
+    client = TestClient(application, client=("198.51.100.11", 8000))
+    assert client.get(
+        "/api/auth/validate",
+        headers={"X-Admin-Password": "legacy-password"},
+    ).status_code == 200
+
+    for attempt in range(4):
+        response = client.get(
+            "/api/auth/validate",
+            headers={"X-Admin-Password": f"wrong-password-{attempt}"},
+        )
+        assert response.status_code == 401
+    limited = client.get(
+        "/api/auth/validate", headers={"X-Admin-Password": "wrong-password-5"}
+    )
+    assert limited.status_code == 429
+
+
+def test_admin_password_default_and_minimum_length(monkeypatch):
+    for name in (
+        "ADMIN_PASSWORD",
+        "MOTIVATIONOS_ADMIN_PASSWORD",
+        "ADMIN_TOKEN",
+        "MOTIVATIONOS_ADMIN_TOKEN",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    assert get_admin_password() == "motivationos"
+
+    monkeypatch.setenv("ADMIN_PASSWORD", "abc")
+    with pytest.raises(ValueError, match="at least 4 characters"):
+        get_admin_password()
 
 
 def test_navigation_home_and_script_are_served(tmp_path):
@@ -118,7 +190,7 @@ def test_production_media_and_api_include_rendered_needs_review_output(tmp_path,
     create_production("rendered-review", record["id"], "review fixture", output, metadata, database)
     update_production("rendered-review", "needs_review", metadata, database_path=database)
     initialize_youtube_database(database)
-    monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "dashboard-api-token")
+    monkeypatch.setenv("ADMIN_PASSWORD", "dashboard-api-token")
     monkeypatch.setenv("MOTIVATIONOS_OUTPUT_DIR", str(output_root))
     monkeypatch.setenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false")
     monkeypatch.setenv("AUTO_PUBLISH_ENABLED", "false")

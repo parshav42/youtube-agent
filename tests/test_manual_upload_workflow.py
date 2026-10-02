@@ -128,7 +128,7 @@ def test_export_upload_package_writes_required_files_and_cli_prints_path(tmp_pat
 def test_dashboard_url_links_production_as_public_manual_upload(tmp_path, monkeypatch):
     database = tmp_path / "link.sqlite3"
     _ready_production(database, tmp_path / "production")
-    monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "manual-upload-test")
+    monkeypatch.setenv("ADMIN_PASSWORD", "manual-upload-test")
     client = TestClient(create_app(database))
 
     response = client.post(

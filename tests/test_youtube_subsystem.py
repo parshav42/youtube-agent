@@ -1162,7 +1162,7 @@ def test_ambiguous_upload_reconciles_by_production_reference(tmp_path) -> None:
 
 
 def test_admin_api_requires_bearer_token_and_never_returns_oauth_tokens(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "admin-test-token")
+    monkeypatch.setenv("ADMIN_PASSWORD", "admin-test-token")
 
     class OAuthFixture:
         def status(self):
@@ -1180,7 +1180,7 @@ def test_admin_api_requires_bearer_token_and_never_returns_oauth_tokens(tmp_path
 
 
 def test_publishing_approval_api_forwards_explicit_channel_id(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "admin-test-token")
+    monkeypatch.setenv("ADMIN_PASSWORD", "admin-test-token")
 
     class PublisherFixture:
         received = None

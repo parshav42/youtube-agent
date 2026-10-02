@@ -35,7 +35,7 @@ def audio_review_api(tmp_path, monkeypatch):
     _create_audio_review_fixture(
         database, "audio-review-production", script_id=script_record["id"]
     )
-    monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "audio-review-test-token")
+    monkeypatch.setenv("ADMIN_PASSWORD", "audio-review-test-token")
     monkeypatch.setenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false")
     with TestClient(create_app(database)) as client:
         yield client, database
@@ -61,7 +61,7 @@ def test_video_qa_missing_and_invalid_media_fail_closed(tmp_path):
 
 def test_production_review_auth_and_one_time_approval(tmp_path, monkeypatch):
     database = tmp_path / "review.sqlite3"
-    monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "test-local-token")
+    monkeypatch.setenv("ADMIN_PASSWORD", "test-local-token")
     script = MockScriptGenerator().generate(ScriptRequest(topic="focus"))
     saved = save_script(script, database_path=database)
     output = tmp_path / "production"
@@ -83,7 +83,7 @@ def test_production_review_auth_and_one_time_approval(tmp_path, monkeypatch):
     assert missing.value.status_code == 404
     auth = review_route.dependant.dependencies[0].call
     with pytest.raises(HTTPException) as denied:
-        auth(credentials=None)
+        auth(credentials=None, x_admin_password=None, request=None)
     assert denied.value.status_code == 401
 
     decision_route = next(route for route in application.routes if getattr(route, "path", None) == "/api/productions/{production_id}/review/{decision}")
@@ -403,7 +403,7 @@ def test_audio_approval_does_not_create_youtube_upload(audio_review_api):
 
 def test_invalid_or_revoked_authentication_is_rejected_safely(audio_review_api, monkeypatch):
     client, _ = audio_review_api
-    monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "replacement-test-token")
+    monkeypatch.setenv("ADMIN_PASSWORD", "replacement-test-token")
 
     response = client.get(
         "/api/productions/audio-review-production/review",

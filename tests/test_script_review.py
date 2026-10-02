@@ -124,7 +124,7 @@ def test_authenticated_review_api_requires_confirmation_and_keeps_approval_separ
     database_path = tmp_path / "scripts.sqlite3"
     record = _save_script(database_path)
     rejected_record = _save_script(database_path, passed=False)
-    monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "test-admin-token")
+    monkeypatch.setenv("ADMIN_PASSWORD", "test-admin-token")
     monkeypatch.setenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false")
     client = TestClient(create_app(database_path))
     headers = {"Authorization": "Bearer test-admin-token"}
@@ -204,7 +204,7 @@ def test_legacy_completed_script_is_visible_and_requires_fresh_confirmation(
         connection.execute(
             "UPDATE scripts SET status = 'completed' WHERE id = ?", (record["id"],)
         )
-    monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "test-admin-token")
+    monkeypatch.setenv("ADMIN_PASSWORD", "test-admin-token")
     monkeypatch.setenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false")
     client = TestClient(create_app(database_path))
     headers = {"Authorization": "Bearer test-admin-token"}
