@@ -292,3 +292,19 @@ def get_groq_api_key() -> str:
 def get_groq_model() -> str:
     """Return the selected Groq chat model."""
     return os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
+
+
+def get_groq_max_tokens() -> int:
+    """Return the token ceiling declared on each Groq request."""
+    value = int(os.getenv("GROQ_MAX_TOKENS", "2048"))
+    if value < 1:
+        raise ValueError("GROQ_MAX_TOKENS must be positive.")
+    return value
+
+
+def get_groq_inter_call_delay_seconds() -> float:
+    """Return the pause after each successful Groq completion."""
+    value = float(os.getenv("GROQ_INTER_CALL_DELAY_SECONDS", "5"))
+    if value < 0:
+        raise ValueError("GROQ_INTER_CALL_DELAY_SECONDS must not be negative.")
+    return value

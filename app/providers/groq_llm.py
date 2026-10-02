@@ -1,10 +1,16 @@
 """Groq OpenAI-compatible provider for text and validated JSON output."""
 
 import os
+import re
 import time
 from typing import Any
 
-from app.config import get_groq_api_key, get_groq_model
+from app.config import (
+    get_groq_api_key,
+    get_groq_inter_call_delay_seconds,
+    get_groq_max_tokens,
+    get_groq_model,
+)
 from app.providers.huggingface_llm import (
     HuggingFaceConfigurationError,
     HuggingFaceInferenceError,
@@ -20,7 +26,7 @@ class GroqProvider(HuggingFaceLLMProvider):
         self,
         model: str | None = None,
         token: str | None = None,
-        base_url: str = "https://api.groq.com",
+        base_url: str = "https://api.groq.com/openai/v1",
         timeout_seconds: float = 60,
         max_retries: int = 2,
         client: Any | None = None,
@@ -82,19 +88,30 @@ class GroqProvider(HuggingFaceLLMProvider):
         return f"Groq ({self.model})"
 
     def generate_text(
-        self, system_prompt: str, user_prompt: str, *, max_tokens: int = 256
+        self, system_prompt: str, user_prompt: str, *, max_tokens: int | None = None
     ) -> str:
         """Generate a plain text completion."""
         text = self._request(
-            system_prompt, user_prompt, json_mode=False, max_tokens=max_tokens
+            system_prompt, user_prompt, json_mode=False,
+            max_tokens=min(max_tokens or get_groq_max_tokens(), get_groq_max_tokens()),
         )
         if not text.strip():
             raise HuggingFaceInferenceError("Groq returned an empty completion.")
         return text.strip()
 
-    def generate(self, prompt: str, *, max_tokens: int = 256) -> str:
+    def generate(self, prompt: str, *, max_tokens: int | None = None) -> str:
         """Convenience one-prompt call used by provider smoke checks."""
         return self.generate_text("Follow the user's request exactly.", prompt, max_tokens=max_tokens)
+
+    def generate_structured(
+        self, response_model: type, system_prompt: str, user_prompt: str,
+        *, max_tokens: int | None = None,
+    ):
+        """Generate schema-validated JSON within the configured Groq token ceiling."""
+        return super().generate_structured(
+            response_model, system_prompt, user_prompt,
+            max_tokens=min(max_tokens or get_groq_max_tokens(), get_groq_max_tokens()),
+        )
 
     def _request(
         self,
@@ -108,7 +125,9 @@ class GroqProvider(HuggingFaceLLMProvider):
         """Request completion, preserving Sarvam's retries and exception types."""
         attempts = self.max_retries + 1 if max_attempts is None else max_attempts
         last_error: Exception | None = None
-        for attempt in range(attempts):
+        rate_limit_retries = 0
+        attempt = 0
+        while attempt < attempts:
             try:
                 arguments: dict[str, Any] = {
                     "model": self.model,
@@ -130,14 +149,24 @@ class GroqProvider(HuggingFaceLLMProvider):
                     )
                 if not isinstance(content, str) or not content.strip():
                     raise HuggingFaceInferenceError("Groq returned no text content.")
+                time.sleep(get_groq_inter_call_delay_seconds())
                 return content
             except Exception as error:
                 last_error = error
                 status = _status_code(error)
+                if status == 429 and rate_limit_retries < 3:
+                    rate_limit_retries += 1
+                    match = re.search(r"try again in\s+([\d.]+)\s*s", str(error), re.IGNORECASE)
+                    time.sleep((float(match.group(1)) if match else 0.0) + 2.0)
+                    continue
                 if status in {400, 401, 403, 404, 422}:
                     break
-                if attempt + 1 < attempts:
+                attempt += 1
+                if attempt < attempts:
                     time.sleep(min(0.25 * (2**attempt), 1.0))
+                    attempt += 1
+                else:
+                    break
 
         status = _status_code(last_error)
         if status in {401, 403}:
