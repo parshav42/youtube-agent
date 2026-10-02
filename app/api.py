@@ -4,6 +4,8 @@ import hmac
 import json
 import logging
 import os
+import threading
+import uuid
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -43,6 +45,8 @@ from app.video.review_gates import production_qa_allows_approval, video_sha256
 
 _bearer = HTTPBearer(auto_error=False)
 logger = logging.getLogger(__name__)
+_daily_jobs: dict[str, dict[str, Any]] = {}
+_daily_jobs_lock = threading.Lock()
 
 
 class ProductionArtifactFiles(StaticFiles):
@@ -135,7 +139,8 @@ def create_app(
         scheduler_requested = os.getenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false").strip().lower() in {
             "1", "true", "yes"
         }
-        if scheduler_requested or get_auto_publish_settings()["enabled"] or get_youtube_auto_match_enabled():
+        from app.config import get_daily_pipeline_settings
+        if scheduler_requested or get_auto_publish_settings()["enabled"] or get_youtube_auto_match_enabled() or get_daily_pipeline_settings()["cron"]:
             scheduler = build_scheduler(str(resolved_path))
             scheduler.start()
         application.state.scheduler = scheduler
@@ -192,6 +197,42 @@ def create_app(
         supplied = credentials.credentials if credentials else ""
         if not hmac.compare_digest(supplied, expected):
             raise HTTPException(status_code=401, detail="Administrative authorization required.")
+
+    @application.post("/api/daily-pipeline", dependencies=[Depends(require_admin)])
+    def start_daily_pipeline() -> dict[str, str]:
+        with _daily_jobs_lock:
+            if any(job.get("status") == "running" for job in _daily_jobs.values()):
+                raise HTTPException(status_code=409, detail="A daily pipeline is already running.")
+            job_id = uuid.uuid4().hex
+            _daily_jobs[job_id] = {"status": "running", "step": "Starting", "result": None, "error": None}
+        def worker() -> None:
+            try:
+                from app.daily_pipeline import run_daily_pipeline
+                result = run_daily_pipeline(resolved_path)
+                with _daily_jobs_lock:
+                    _daily_jobs[job_id].update(status="complete", step="Complete", result=result)
+            except Exception as error:
+                logger.exception("Dashboard daily pipeline failed job_id=%s", job_id)
+                with _daily_jobs_lock:
+                    production_id = getattr(error, "production_id", None)
+                    script_id = getattr(error, "script_id", None)
+                    resume = (
+                        f"python -m app.main --resume-production {production_id}"
+                        if production_id else
+                        f"Manual review required for script {script_id}."
+                        if script_id else None
+                    )
+                    _daily_jobs[job_id].update(status="failed", step=getattr(error, "step", "Pipeline"), error=str(error), resume=resume)
+        threading.Thread(target=worker, name=f"daily-pipeline-{job_id[:8]}", daemon=True).start()
+        return {"job_id": job_id, "status": "running"}
+
+    @application.get("/api/daily-pipeline/{job_id}", dependencies=[Depends(require_admin)])
+    def daily_pipeline_status(job_id: str) -> dict[str, Any]:
+        with _daily_jobs_lock:
+            job = _daily_jobs.get(job_id)
+            if job is None:
+                raise HTTPException(status_code=404, detail="Pipeline job was not found.")
+            return dict(job)
 
     @application.get("/api/productions", dependencies=[Depends(require_admin)])
     def productions_list() -> list[dict[str, Any]]:

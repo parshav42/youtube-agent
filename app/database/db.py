@@ -386,6 +386,18 @@ def review_script(
     return record
 
 
+def delete_unreviewed_script(script_id: int, database_path: str | Path | None = None) -> None:
+    """Remove a failed pipeline draft only while it is still unreviewed."""
+    initialize_database(database_path)
+    with _connection(database_path) as connection:
+        cursor = connection.execute(
+            "DELETE FROM scripts WHERE id = ? AND status = 'needs_review' AND reviewed_at IS NULL AND reviewed_by IS NULL",
+            (script_id,),
+        )
+        if cursor.rowcount != 1:
+            raise ScriptReviewError("Only an unreviewed draft can be removed after exhausted pipeline retries.")
+
+
 
 def _decode_production(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:

@@ -198,6 +198,20 @@ Every generated script is saved as `needs_review`, even when its automated quali
 
 `MIN_SCRIPT_QUALITY_SCORE` sets the quality threshold used for script evaluation (default `7.5`); the same setting is used by the publishing quality gate. The legacy `MOTIVATIONOS_QUALITY_THRESHOLD` remains a fallback when `MIN_SCRIPT_QUALITY_SCORE` is unset. Lowering the threshold does not bypass any of the eleven required evaluation checks.
 
+### Fully automated pipeline
+
+`--run-daily-pipeline` generates and reviews one script, creates or reuses licensed scene images, renders the video, checks QA and provenance, records synthetic approval audit entries, and exports a ready-to-upload package. It never uploads or publishes to YouTube; the YouTube upload remains manual by design.
+
+```bash
+.venv/bin/python -m app.main --run-daily-pipeline
+```
+
+`AUTO_APPROVE_SCRIPTS` and `AUTO_APPROVE_PRODUCTIONS` default to `true`; set either to `false` to stop at that manual review gate. `MIN_SCRIPT_QUALITY_SCORE` uses a 0–100 scale for this command (default `75`; existing 0–10 values are accepted for compatibility). A script must score strictly above the threshold. `DAILY_PIPELINE_MAX_SCRIPT_RETRIES` defaults to `3` retries after the first draft. `DAILY_PIPELINE_NICHE` optionally overrides the selected topic. Approval stops if QA, recorded video hash, or any scene's `LICENSES.json` source/license/rights-holder provenance is missing.
+
+To schedule the pipeline, set `DAILY_PIPELINE_CRON` to a five-field UTC cron expression, for example `0 8 * * *`, and start the API scheduler with `MOTIVATIONOS_SCHEDULER_ENABLED=true`. Each scheduled run logs its timestamp and outcome. The dashboard at `/production-review` also has a **Run daily pipeline** action with polled progress.
+
+If a run fails after rendering, use its production ID with `python -m app.main --resume-production <production_id>`; after the required review gate is resolved, export with `python -m app.main --export-upload-package <production_id>`. If it stops at script review, use `--approve-script <script_id> --reviewer "Your Name"`, then continue with `--generate-images <script_id>` and `--produce-script <script_id>`. The only publishing step is still the manual YouTube Studio upload.
+
 Approve a passing script from the CLI after a person has reviewed it:
 
 ```bash
