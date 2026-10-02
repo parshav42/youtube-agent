@@ -61,6 +61,7 @@ class ResearchState(TypedDict, total=False):
     resume_production_id: str
     production_result: dict[str, Any]
     require_human_review: bool
+    debug: bool
 
 
 def build_workflow(
@@ -322,6 +323,8 @@ def build_workflow(
                 record = service.produce_script_record(state["production_script_id"])
             return {"production_result": record}
         except Exception as error:
+            if state.get("debug"):
+                raise
             errors = list(state.get("errors", []))
             errors.append(f"video_production_node: {error}")
             return {"errors": errors}
