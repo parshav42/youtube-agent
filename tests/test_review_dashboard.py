@@ -72,6 +72,23 @@ def test_admin_password_header_and_bearer_authentication(tmp_path, monkeypatch):
     assert correct_bearer.status_code == 200
 
 
+def test_post_admin_password_validation_and_empty_production_list(tmp_path, monkeypatch):
+    monkeypatch.setenv("ADMIN_PASSWORD", "dashboard-password")
+    application = create_app(tmp_path / "post-password-auth.sqlite3")
+    client = TestClient(application)
+
+    assert client.post("/api/auth/validate").status_code == 401
+    assert client.post(
+        "/api/auth/validate", headers={"X-Admin-Password": "wrong-password"}
+    ).status_code == 401
+    assert client.post(
+        "/api/auth/validate", headers={"X-Admin-Password": "dashboard-password"}
+    ).status_code == 200
+    assert client.get(
+        "/api/productions", headers={"X-Admin-Password": "dashboard-password"}
+    ).json() == []
+
+
 def test_legacy_admin_token_fallback_and_wrong_attempt_rate_limit(tmp_path, monkeypatch):
     for name in (
         "ADMIN_PASSWORD",
@@ -149,7 +166,8 @@ def test_production_review_page_is_local_and_cannot_upload(tmp_path) -> None:
     assert ".textContent" in script
     assert "media-src 'self' blob: data:" in response.headers["content-security-policy"]
     assert "video.src = data.video_url" in script
-    assert "URL.createObjectURL" not in script
+    assert "video.src = URL.createObjectURL" not in script
+    assert "URL.createObjectURL(blob)" in script  # authenticated package download
     assert 'data.status === "needs_review" && data.video_exists' in script
 
 
@@ -176,6 +194,19 @@ def test_audio_review_dashboard_renders_findings_safely_and_separates_decisions(
     assert "response.status >= 500" in script
     assert 'id="signout"' in html and 'id="refresh-review"' in html
     assert 'rel="stylesheet" href="/review-assets/review.css"' in html
+
+
+def test_review_pages_have_password_auth_and_production_list_without_manual_id() -> None:
+    static = Path(__file__).resolve().parents[1] / "app" / "static"
+    review_html = (static / "review.html").read_text(encoding="utf-8")
+    production_html = (static / "production-review.html").read_text(encoding="utf-8")
+    production_js = (static / "production-review.js").read_text(encoding="utf-8")
+    assert "Admin token" not in review_html
+    assert 'id="production-list"' in production_html
+    assert 'id="id"' not in production_html
+    assert "Production ID" not in production_html
+    assert "new URLSearchParams(window.location.search).get(\"id\")" in production_js
+    assert 'request("/api/productions")' in production_js
 
 
 def test_production_media_and_api_include_rendered_needs_review_output(tmp_path, monkeypatch):

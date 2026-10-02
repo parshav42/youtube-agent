@@ -404,6 +404,9 @@
       auth.storePassword(suppliedPassword);
       adminPassword = suppliedPassword;
       passwordDialog.close();
+      reviewer = elements.reviewerInput.value.trim() || "Admin";
+      elements.authView.hidden = true;
+      elements.dashboardView.hidden = false;
       await refreshQueue();
     } catch (error) {
       if (error.authFailure) return;
@@ -438,6 +441,10 @@
     if (elements.decisionDialog.returnValue === "confirm") submitDecision();
     else pendingDecision = null;
   });
-  if (adminPassword) refreshQueue();
-  else promptForPassword();
+  if (adminPassword) {
+    reviewer = elements.reviewerInput.value.trim() || "Admin";
+    elements.authView.hidden = true;
+    elements.dashboardView.hidden = false;
+    refreshQueue();
+  } else promptForPassword();
 })();

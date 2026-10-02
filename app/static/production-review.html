@@ -25,17 +25,21 @@
       </div>
     </header>
 
-    <form id="auth" class="production-auth">
-      <label for="id">Production ID</label>
-      <input id="id" required autocomplete="off">
-      <button class="button button-primary" type="submit">Load review</button>
-    </form>
     <p id="error" class="production-error" role="alert" aria-live="polite"></p>
+    <section id="production-list-section" class="production-section" hidden>
+      <h2>Productions</h2>
+      <div class="production-table-wrap"><table id="production-table">
+        <thead><tr><th>Title</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+        <tbody id="production-list"></tbody>
+      </table></div>
+      <p id="production-empty" hidden>No productions found.</p>
+    </section>
     <section id="daily-pipeline-status" class="production-section" aria-live="polite" hidden>
       <h2>Daily pipeline</h2><p id="daily-pipeline-progress">Ready</p><pre id="daily-pipeline-summary"></pre>
     </section>
 
-    <main id="content" hidden>
+    <section id="content" hidden>
+      <button id="back-to-list" class="button button-quiet" type="button">Back to productions</button>
       <section class="production-section production-preview">
         <h2 id="title"></h2>
         <p id="video-unavailable" role="status" hidden></p>
@@ -89,7 +93,7 @@
         </div>
         <p class="production-note">Production approval only makes this artifact eligible for a separate publishing action.</p>
       </section>
-    </main>
+    </section>
   </main>
   <dialog id="password-dialog" class="decision-dialog" aria-labelledby="password-heading">
     <form id="password-form">

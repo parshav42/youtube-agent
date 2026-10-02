@@ -2,7 +2,6 @@
 
 (() => {
   const byId = (id) => document.getElementById(id);
-  const form = byId("auth");
   const error = byId("error");
   const content = byId("content");
   const video = byId("video");
@@ -12,7 +11,7 @@
   const passwordInput = byId("password-input");
   const passwordError = byId("password-error");
   let reviewPassword = auth.readPassword() || "";
-  let productionId = "";
+  let productionId = new URLSearchParams(window.location.search).get("id") || "";
   let pipelinePoll = null;
 
   function showError(message) {
@@ -27,7 +26,7 @@
   function showAuth(message = "") {
     auth.clearPassword();
     reviewPassword = "";
-    form.hidden = false;
+    byId("production-list-section").hidden = true;
     content.hidden = true;
     byId("signout").hidden = true;
     byId("refresh-review").disabled = true;
@@ -220,10 +219,62 @@
       const data = await request(`/api/productions/${encodeURIComponent(productionId)}/review`);
       renderReview(data);
       content.hidden = false;
+      byId("production-list-section").hidden = true;
       byId("run-daily-pipeline").disabled = false;
     } catch (cause) {
       if (cause.authFailure) showAuth(cause.message);
       else showError(cause instanceof Error ? cause.message : "Review request failed.");
+    }
+  }
+
+  async function loadProductions() {
+    if (!reviewPassword) return;
+    content.hidden = true;
+    byId("production-list-section").hidden = false;
+    byId("production-list").replaceChildren();
+    showError("");
+    try {
+      const productions = await request("/api/productions");
+      byId("production-empty").hidden = productions.length !== 0;
+      for (const item of productions) {
+        const row = document.createElement("tr");
+        for (const value of [item.title || item.production_id, item.status || "unknown", formatDate(item.created_at)]) {
+          const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
+        }
+        const actions = document.createElement("td");
+        const view = document.createElement("button");
+        view.className = "button button-quiet"; view.type = "button"; view.textContent = "View";
+        view.addEventListener("click", () => {
+          productionId = item.production_id;
+          history.replaceState(null, "", `/production-review?id=${encodeURIComponent(productionId)}`);
+          loadReview();
+        });
+        actions.append(view);
+        if (["ready_for_manual_upload", "completed", "published"].includes(item.status)) {
+          const exportButton = document.createElement("button");
+          exportButton.className = "button button-quiet"; exportButton.type = "button"; exportButton.textContent = "Export package";
+          exportButton.addEventListener("click", async () => {
+            try {
+              const response = await auth.fetchWithPassword(fetch, `/api/productions/${encodeURIComponent(item.production_id)}/export-package`, {}, { password: reviewPassword });
+              if (!response.ok) throw new Error("Package export is unavailable for this production.");
+              const blob = await response.blob(); const url = URL.createObjectURL(blob);
+              const link = document.createElement("a"); link.href = url; link.download = `${item.production_id}-upload-package.zip`; link.click();
+              URL.revokeObjectURL(url);
+            } catch (cause) { showError(cause instanceof Error ? cause.message : "Package export failed."); }
+          });
+          actions.append(exportButton);
+        }
+        if (item.status === "published" && item.manual_upload_url) {
+          const copy = document.createElement("button");
+          copy.className = "button button-quiet"; copy.type = "button"; copy.textContent = "Copy YouTube URL";
+          copy.addEventListener("click", async () => { await navigator.clipboard.writeText(item.manual_upload_url); copy.textContent = "Copied"; });
+          actions.append(copy);
+        }
+        row.append(actions); byId("production-list").append(row);
+      }
+    } catch (cause) {
+      if (cause.authFailure) showAuth(cause.message);
+      else showError(cause instanceof Error ? cause.message : "Production list could not be loaded.");
     }
   }
 
@@ -257,13 +308,15 @@
     passwordInput.value = "";
     passwordError.textContent = "";
     try {
-      await request("/api/auth/validate", {}, suppliedPassword);
+      await request("/api/auth/validate", { method: "POST" }, suppliedPassword);
       auth.storePassword(suppliedPassword);
       reviewPassword = suppliedPassword;
       passwordDialog.close();
       byId("refresh-review").disabled = false;
       byId("run-daily-pipeline").disabled = false;
+      byId("signout").hidden = false;
       showError("");
+      if (productionId) await loadReview(); else await loadProductions();
     } catch (cause) {
       if (cause.authFailure) return;
       passwordError.textContent = cause instanceof Error
@@ -272,16 +325,13 @@
     }
   });
 
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    productionId = byId("id").value.trim();
-    form.hidden = true;
-    byId("signout").hidden = false;
-    byId("refresh-review").disabled = false;
-    await loadReview();
+  byId("refresh-review").addEventListener("click", () => productionId ? loadReview() : loadProductions());
+  byId("back-to-list").addEventListener("click", () => {
+    productionId = "";
+    history.replaceState(null, "", "/production-review");
+    content.hidden = true;
+    loadProductions();
   });
-
-  byId("refresh-review").addEventListener("click", loadReview);
   byId("signout").addEventListener("click", () => showAuth());
   window.addEventListener("motivationos:signout", () => showAuth());
   byId("audio-approve").addEventListener("click", () => recordDecision("audio-review", "approve"));
@@ -307,7 +357,11 @@
     }
   });
   if (reviewPassword) {
-    request("/api/auth/validate").catch((cause) => {
+    request("/api/auth/validate", { method: "POST" }).then(() => {
+      byId("signout").hidden = false;
+      if (productionId) return loadReview();
+      return loadProductions();
+    }).catch((cause) => {
       if (!cause.authFailure) showError(cause instanceof Error ? cause.message : "Sign in could not be completed.");
     });
   } else {

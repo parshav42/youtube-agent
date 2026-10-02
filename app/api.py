@@ -4,6 +4,7 @@ import hmac
 import json
 import logging
 import os
+import shutil
 import threading
 import time
 import uuid
@@ -208,7 +209,9 @@ def create_app(
             supplied = credentials.credentials
         if supplied is None:
             raise HTTPException(status_code=401, detail="Password required")
-        if not hmac.compare_digest(supplied, expected):
+        if not hmac.compare_digest(
+            supplied.encode("utf-8"), expected.encode("utf-8")
+        ):
             client_ip = (
                 request.client.host
                 if request is not None and request.client is not None
@@ -238,6 +241,10 @@ def create_app(
 
     @application.get("/api/auth/validate", dependencies=[Depends(require_admin)])
     def validate_admin_password() -> dict[str, bool]:
+        return {"authenticated": True}
+
+    @application.post("/api/auth/validate", dependencies=[Depends(require_admin)])
+    def validate_admin_password_post() -> dict[str, bool]:
         return {"authenticated": True}
 
     @application.post("/api/daily-pipeline", dependencies=[Depends(require_admin)])
@@ -278,24 +285,36 @@ def create_app(
 
     @application.get("/api/productions", dependencies=[Depends(require_admin)])
     def productions_list() -> list[dict[str, Any]]:
-        included_statuses = {
-            "failed", "needs_review", "ready_for_manual_upload", "published",
-            "completed", "approved",
-        }
         results = []
         for production in get_productions(resolved_path):
             output_root = Path(production["output_dir"]).resolve()
-            if production["status"] not in included_statuses or not (output_root / "final.mp4").is_file():
-                continue
+            script = get_script_by_id(production["script_id"], resolved_path)
+            title = production["topic"]
+            if script and isinstance(script.get("script"), dict):
+                candidates = script["script"].get("title_candidates")
+                if isinstance(candidates, list) and candidates and candidates[0]:
+                    title = str(candidates[0])
             upload = get_upload(production["id"], resolved_path)
             results.append({
                 "production_id": production["id"],
+                "title": title,
                 "status": production["status"],
+                "created_at": production["created_at"],
                 "video_url": f"/media/productions/{production['id']}/final.mp4",
-                "video_exists": True,
+                "video_exists": (output_root / "final.mp4").is_file(),
                 "manual_upload_url": upload.get("video_url") if upload else None,
             })
         return results
+
+    @application.get("/api/productions/{production_id}/export-package", dependencies=[Depends(require_admin)])
+    def production_export_package(production_id: str) -> FileResponse:
+        production = get_production_by_id(production_id, resolved_path)
+        if production is None:
+            raise HTTPException(status_code=404, detail="Production was not found.")
+        from app.youtube.manual_upload import export_upload_package
+        package_dir = Path(export_upload_package(production_id, resolved_path))
+        archive = Path(shutil.make_archive(str(package_dir), "zip", root_dir=package_dir))
+        return FileResponse(archive, filename=f"{production_id}-upload-package.zip", media_type="application/zip")
 
     @application.get("/api/productions/{production_id}", dependencies=[Depends(require_admin)])
     def production_detail(production_id: str) -> dict[str, Any]:
