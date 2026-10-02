@@ -7,6 +7,7 @@
   <title>Production Review | MotivationOS</title>
   <link rel="stylesheet" href="/review-assets/review.css">
   <script src="/review-assets/nav.js" defer></script>
+  <script src="/review-assets/admin-auth.js" defer></script>
   <script src="/review-assets/production-review.js" defer></script>
 </head>
 <body style="padding-top: 56px">
@@ -25,8 +26,6 @@
     </header>
 
     <form id="auth" class="production-auth">
-      <label for="token">Admin token</label>
-      <input id="token" type="password" required autocomplete="off">
       <label for="id">Production ID</label>
       <input id="id" required autocomplete="off">
       <button class="button button-primary" type="submit">Load review</button>
@@ -92,5 +91,17 @@
       </section>
     </main>
   </main>
+  <dialog id="password-dialog" class="decision-dialog" aria-labelledby="password-heading">
+    <form id="password-form">
+      <p class="eyebrow">Admin sign in</p>
+      <h2 id="password-heading">Enter your password</h2>
+      <label for="password-input">Admin password</label>
+      <input id="password-input" type="password" minlength="4" autocomplete="current-password" required>
+      <p id="password-error" class="dialog-message" role="alert" aria-live="polite"></p>
+      <div class="dialog-actions">
+        <button class="button button-primary" type="submit">Sign in</button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>

@@ -12,6 +12,8 @@
       #motivationos-nav .nav-links { height: 100%; display: flex; align-items: stretch; gap: 28px; }
       #motivationos-nav .nav-link { display: inline-flex; align-items: center; border-bottom: 3px solid transparent; padding-top: 3px; }
       #motivationos-nav .nav-link[aria-current="page"] { border-bottom-color: #FFD400; }
+      #motivationos-nav .nav-signout { color: #fff; border: 1px solid #496075; border-radius: 6px; padding: 7px 10px; background: transparent; font: inherit; cursor: pointer; }
+      #motivationos-nav .nav-signout:hover { border-color: #FFD400; }
       #motivationos-nav .nav-toggle { display: none; color: #fff; background: none; border: 1px solid #496075; border-radius: 6px; padding: 7px 10px; font: inherit; cursor: pointer; }
       @media (max-width: 639px) {
         #motivationos-nav .nav-inner { padding: 0 16px; }
@@ -50,12 +52,21 @@
       if (href === path) link.setAttribute("aria-current", "page");
       list.appendChild(link);
     });
+    const signout = document.createElement("button");
+    signout.className = "nav-signout";
+    signout.type = "button";
+    signout.textContent = "Sign out";
+    signout.hidden = path !== "/review" && path !== "/production-review";
+    signout.addEventListener("click", () => {
+      window.MotivationOSAdminAuth.clearPassword();
+      window.location.reload();
+    });
     toggle.addEventListener("click", () => {
       const open = list.classList.toggle("is-open");
       toggle.setAttribute("aria-expanded", String(open));
       toggle.setAttribute("aria-label", open ? "Close navigation menu" : "Open navigation menu");
     });
-    inner.append(brand, toggle, list);
+    inner.append(brand, toggle, list, signout);
     nav.appendChild(inner);
     document.body.insertBefore(nav, document.body.firstChild);
   };

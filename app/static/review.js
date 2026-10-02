@@ -2,12 +2,17 @@
 
 (() => {
   const elements = Object.fromEntries([
-    "authView", "authForm", "reviewerInput", "tokenInput", "dashboardView", "refreshButton",
+    "authView", "authForm", "reviewerInput", "dashboardView", "refreshButton",
     "signoutButton", "queueCount", "queueLoading", "queueList", "emptyQueue", "queueError",
     "detailPlaceholder", "detailLoading", "detailError", "scriptDetail", "notice", "decisionDialog",
     "dialogTitle", "dialogMessage", "dialogConfirm"
   ].map((name) => [name, document.getElementById(name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`))]));
 
+  const auth = window.MotivationOSAdminAuth;
+  const passwordDialog = document.getElementById("password-dialog");
+  const passwordForm = document.getElementById("password-form");
+  const passwordInput = document.getElementById("password-input");
+  const passwordError = document.getElementById("password-error");
   const labels = {
     language_consistency: "Language consistency",
     story_coherence: "Story coherence",
@@ -21,7 +26,7 @@
     unsupported_factual_assertions: "Unsupported factual assertions",
     unsupported_guarantees: "Unsupported guarantees"
   };
-  let adminToken = "";
+  let adminPassword = auth.readPassword() || "";
   let reviewer = "";
   let queue = [];
   let selectedId = null;
@@ -65,27 +70,35 @@
     elements.notice.textContent = "";
   }
 
+  function promptForPassword(message = "") {
+    passwordError.textContent = message;
+    if (!passwordDialog.open) passwordDialog.showModal();
+    passwordInput.focus();
+  }
+
   function showAuth(message = "") {
-    adminToken = "";
+    auth.clearPassword();
+    adminPassword = "";
     reviewer = "";
     elements.authView.hidden = false;
     elements.dashboardView.hidden = true;
     elements.refreshButton.disabled = true;
-    elements.tokenInput.value = "";
     elements.reviewerInput.value = "";
-    if (message) showNotice(message, "error");
+    promptForPassword(message);
   }
 
-  async function request(path, options = {}) {
+  async function request(path, options = {}, password = adminPassword) {
     let response;
     try {
-      response = await fetch(path, {
+      response = await auth.fetchWithPassword(fetch, path, {
         ...options,
         headers: {
-          Authorization: `Bearer ${adminToken}`,
           ...(options.body ? { "Content-Type": "application/json" } : {}),
           ...options.headers
         }
+      }, {
+        password,
+        onUnauthorized: () => showAuth("Your password was not accepted. Sign in again.")
       });
     } catch {
       throw new Error("Could not reach the local API. Check that the server is running and try again.");
@@ -97,12 +110,12 @@
       payload = null;
     }
     if (response.status === 401 || response.status === 403) {
-      const error = new Error("Admin authorization failed. Enter a valid token to continue.");
+      const error = new Error("Your password was not accepted. Sign in again.");
       error.authFailure = true;
       throw error;
     }
     if (response.status === 503) {
-      throw new Error("The administrative API is not configured. Set its admin token and restart the local server.");
+      throw new Error("The administrative API is not configured correctly. Check ADMIN_PASSWORD and restart the local server.");
     }
     if (!response.ok) {
       const detail = payload && typeof payload.detail === "string" ? payload.detail : "The request could not be completed.";
@@ -322,7 +335,7 @@
       }
     } finally {
       elements.queueLoading.hidden = true;
-      elements.refreshButton.disabled = !adminToken;
+      elements.refreshButton.disabled = !adminPassword;
     }
   }
 
@@ -381,15 +394,31 @@
     }
   }
 
+  passwordForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const suppliedPassword = passwordInput.value;
+    passwordInput.value = "";
+    passwordError.textContent = "";
+    try {
+      await request("/api/auth/validate", {}, suppliedPassword);
+      auth.storePassword(suppliedPassword);
+      adminPassword = suppliedPassword;
+      passwordDialog.close();
+      await refreshQueue();
+    } catch (error) {
+      if (error.authFailure) return;
+      passwordError.textContent = error instanceof Error
+        ? error.message
+        : "Sign in could not be completed.";
+    }
+  });
+
   elements.authForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const suppliedToken = elements.tokenInput.value.trim();
     const suppliedReviewer = elements.reviewerInput.value.trim();
-    if (!suppliedToken || !suppliedReviewer) return;
+    if (!suppliedReviewer) return;
     hideNotice();
-    adminToken = suppliedToken;
     reviewer = suppliedReviewer;
-    elements.tokenInput.value = "";
     elements.authView.hidden = true;
     elements.dashboardView.hidden = false;
     elements.refreshButton.disabled = false;
@@ -404,8 +433,11 @@
     hideNotice();
     showAuth();
   });
+  window.addEventListener("motivationos:signout", () => showAuth());
   elements.decisionDialog.addEventListener("close", () => {
     if (elements.decisionDialog.returnValue === "confirm") submitDecision();
     else pendingDecision = null;
   });
+  if (adminPassword) refreshQueue();
+  else promptForPassword();
 })();

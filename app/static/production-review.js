@@ -6,7 +6,12 @@
   const error = byId("error");
   const content = byId("content");
   const video = byId("video");
-  let reviewToken = "";
+  const auth = window.MotivationOSAdminAuth;
+  const passwordDialog = byId("password-dialog");
+  const passwordForm = byId("password-form");
+  const passwordInput = byId("password-input");
+  const passwordError = byId("password-error");
+  let reviewPassword = auth.readPassword() || "";
   let productionId = "";
   let pipelinePoll = null;
 
@@ -20,8 +25,8 @@
   }
 
   function showAuth(message = "") {
-    reviewToken = "";
-    byId("token").value = "";
+    auth.clearPassword();
+    reviewPassword = "";
     form.hidden = false;
     content.hidden = true;
     byId("signout").hidden = true;
@@ -29,19 +34,24 @@
     byId("run-daily-pipeline").disabled = true;
     clearVideo();
     showError(message);
+    passwordError.textContent = message;
+    if (!passwordDialog.open) passwordDialog.showModal();
+    passwordInput.focus();
   }
 
-  async function request(path, options = {}) {
+  async function request(path, options = {}, password = reviewPassword) {
     const fetchOptions = options;
     let response;
     try {
-      response = await fetch(path, {
+      response = await auth.fetchWithPassword(fetch, path, {
         ...fetchOptions,
         headers: {
-          Authorization: `Bearer ${reviewToken}`,
           ...(fetchOptions.body ? { "Content-Type": "application/json" } : {}),
           ...fetchOptions.headers
         }
+      }, {
+        password,
+        onUnauthorized: () => showAuth("Your password was not accepted. Sign in again.")
       });
     } catch {
       throw new Error("Could not reach the local API. Check that the server is running and try again.");
@@ -53,12 +63,12 @@
       payload = null;
     }
     if (response.status === 401 || response.status === 403) {
-      const authError = new Error("Admin authorization failed. Sign in again to continue.");
+      const authError = new Error("Your password was not accepted. Sign in again.");
       authError.authFailure = true;
       throw authError;
     }
     if (response.status === 503) {
-      throw new Error("The administrative API is not configured. Set its admin token and restart the local server.");
+      throw new Error("The administrative API is not configured correctly. Check ADMIN_PASSWORD and restart the local server.");
     }
     if (!response.ok) {
       const detail = payload && typeof payload.detail === "string" ? payload.detail : "The request could not be completed.";
@@ -204,7 +214,7 @@
   }
 
   async function loadReview() {
-    if (!reviewToken || !productionId) return;
+    if (!reviewPassword || !productionId) return;
     showError("");
     try {
       const data = await request(`/api/productions/${encodeURIComponent(productionId)}/review`);
@@ -241,12 +251,30 @@
     }
   }
 
+  passwordForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const suppliedPassword = passwordInput.value;
+    passwordInput.value = "";
+    passwordError.textContent = "";
+    try {
+      await request("/api/auth/validate", {}, suppliedPassword);
+      auth.storePassword(suppliedPassword);
+      reviewPassword = suppliedPassword;
+      passwordDialog.close();
+      byId("refresh-review").disabled = false;
+      byId("run-daily-pipeline").disabled = false;
+      showError("");
+    } catch (cause) {
+      if (cause.authFailure) return;
+      passwordError.textContent = cause instanceof Error
+        ? cause.message
+        : "Sign in could not be completed.";
+    }
+  });
+
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const tokenInput = byId("token");
-    reviewToken = tokenInput.value.trim();
     productionId = byId("id").value.trim();
-    tokenInput.value = "";
     form.hidden = true;
     byId("signout").hidden = false;
     byId("refresh-review").disabled = false;
@@ -255,6 +283,7 @@
 
   byId("refresh-review").addEventListener("click", loadReview);
   byId("signout").addEventListener("click", () => showAuth());
+  window.addEventListener("motivationos:signout", () => showAuth());
   byId("audio-approve").addEventListener("click", () => recordDecision("audio-review", "approve"));
   byId("audio-reject").addEventListener("click", () => recordDecision("audio-review", "reject"));
   byId("approve").addEventListener("click", () => recordDecision("review", "approve"));
@@ -277,4 +306,11 @@
       saveButton.disabled = false;
     }
   });
+  if (reviewPassword) {
+    request("/api/auth/validate").catch((cause) => {
+      if (!cause.authFailure) showError(cause instanceof Error ? cause.message : "Sign in could not be completed.");
+    });
+  } else {
+    showAuth();
+  }
 })();

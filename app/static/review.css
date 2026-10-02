@@ -139,6 +139,8 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .decision-dialog { width: min(440px, calc(100% - 32px)); padding: 25px; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 25px 80px rgb(10 28 20 / 25%); }
 .decision-dialog::backdrop { background: rgb(18 34 28 / 54%); backdrop-filter: blur(2px); }
 .decision-dialog h2 { margin: 0; font-family: Georgia, serif; font-size: 26px; font-weight: 500; }
+.decision-dialog label { display: block; margin-top: 18px; font-size: 13px; font-weight: 700; }
+.decision-dialog input { width: 100%; min-height: 42px; margin-top: 6px; padding: 0 11px; border: 1px solid #cbd4cb; border-radius: 5px; outline-color: var(--green); background: white; color: var(--ink); }
 .dialog-message { color: var(--muted); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
 
