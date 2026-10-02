@@ -9,10 +9,12 @@ from types import SimpleNamespace
 from PIL import Image
 import pytest
 
+from app import main as cli
 from app.agents.quality_agent import evaluate_script
 from app.agents.script_agent import MockScriptGenerator
 from app.database.db import review_script, save_script
 from app.schemas.script_schema import ProductionMetadata, ScriptRequest
+from app.video.image_generator import ImageGenerationError
 from app.video.production_service import ProductionService
 from app.video.tts_engine import AudioMetadata
 from app.video.visual_asset_manager import LicensedLocalAssetManager, VisualAssetError
@@ -181,3 +183,39 @@ def test_asset_manager_accepts_documented_pollinations_provenance(tmp_path):
 
     assert acquired[0]["source"] == "Pollinations AI (generated)"
     assert acquired[0]["rights_holder"] == "Pollinations.AI"
+
+
+def test_generate_images_cli_reports_partial_files_and_manifest(tmp_path, monkeypatch, capsys):
+    database_path = tmp_path / "scripts.sqlite3"
+    script = MockScriptGenerator().generate(ScriptRequest(topic="discipline"))
+    record = save_script(
+        script,
+        evaluation=evaluate_script(script),
+        database_path=database_path,
+    )
+    library = tmp_path / "assets"
+
+    class PartialProvider:
+        provider_name = "Pollinations AI test stub"
+        model = "flux-test"
+
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, prompt, output_path):
+            self.calls += 1
+            if self.calls == 2:
+                raise ImageGenerationError("HTTP 402 access required", status_code=402)
+            Path(output_path).with_suffix(".png").write_bytes(_png_bytes())
+
+    monkeypatch.setenv("IMAGE_PROVIDER", "pollinations")
+    monkeypatch.setattr(cli, "get_licensed_asset_path", lambda: library)
+    monkeypatch.setattr(cli, "build_image_provider", PartialProvider)
+
+    exit_code = cli.generate_images(record["id"], str(database_path))
+
+    output = capsys.readouterr()
+    assert exit_code == 1
+    assert f"Wrote image: {library / 'scene_01.png'}" in output.out
+    assert f"LICENSES.json: {library / 'LICENSES.json'}" in output.out
+    assert "Scene 2 image generation failed" in output.err

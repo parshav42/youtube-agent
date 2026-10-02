@@ -257,27 +257,39 @@ def generate_images(
         script = MotivationalScript.model_validate(record["script"])
         provider = build_image_provider()
         library = get_licensed_asset_path()
-        existing = {
-            path.resolve()
-            for scene in script.scenes
-            for path in library.glob(f"scene_{scene.scene_number:02d}.*")
-            if path.is_file()
-        }
-        paths = generate_scene_images(
-            script.scenes,
-            library_path=library,
-            provider=provider,
-            force=force,
-            scene_number=scene_number,
-        )
     except (ImageGenerationError, ValueError) as error:
         print(f"Image generation failed: {error}", file=sys.stderr)
         return 1
-    for path in paths:
-        if force or path.resolve() not in existing:
-            print(f"Wrote image: {path}")
-        else:
-            print(f"Reused image: {path}")
+    selected_scenes = [
+        scene for scene in script.scenes
+        if scene_number is None or scene.scene_number == scene_number
+    ]
+    if not selected_scenes:
+        print(f"Image generation failed: Script {script_id} has no scene {scene_number}.", file=sys.stderr)
+        print(f"LICENSES.json: {library / 'LICENSES.json'}")
+        return 1
+    for scene in selected_scenes:
+        existing = {
+            path.resolve()
+            for path in library.glob(f"scene_{scene.scene_number:02d}.*")
+            if path.is_file()
+        }
+        try:
+            paths = generate_scene_images(
+                [scene],
+                library_path=library,
+                provider=provider,
+                force=force,
+            )
+        except ImageGenerationError as error:
+            print(f"LICENSES.json: {library / 'LICENSES.json'}")
+            print(f"Image generation failed: {error}", file=sys.stderr)
+            return 1
+        for path in paths:
+            if force or path.resolve() not in existing:
+                print(f"Wrote image: {path}")
+            else:
+                print(f"Reused image: {path}")
     print(f"LICENSES.json: {library / 'LICENSES.json'}")
     return 0
 
