@@ -81,6 +81,63 @@ def get_youtube_visibility() -> str:
     return visibility
 
 
+def get_auto_publish_settings() -> dict[str, object]:
+    """Parse fail-closed automatic publishing policy and quota configuration."""
+    enabled = _get_bool("AUTO_PUBLISH_ENABLED", False)
+    visibility = os.getenv("YOUTUBE_PRIVACY_STATUS", "public").strip().lower()
+    if visibility not in {"private", "unlisted", "public"}:
+        raise ValueError("YOUTUBE_PRIVACY_STATUS must be private, unlisted, or public.")
+    if enabled and visibility != "public":
+        raise ValueError("Automatic publishing is public-only; set YOUTUBE_PRIVACY_STATUS=public.")
+    category_id = os.getenv("YOUTUBE_CATEGORY_ID", "22").strip()
+    if not category_id.isdigit() or len(category_id) > 3:
+        raise ValueError("YOUTUBE_CATEGORY_ID must contain 1 to 3 digits.")
+    return {
+        "enabled": enabled,
+        "cron": os.getenv("AUTO_PUBLISH_CRON", "0 9 * * *").strip(),
+        "privacy_status": visibility,
+        "auto_approve_scripts": _get_bool("AUTO_APPROVE_SCRIPTS", False),
+        "auto_approve_productions": _get_bool("AUTO_APPROVE_PRODUCTIONS", False),
+        "min_script_quality_score": _get_score("MIN_SCRIPT_QUALITY_SCORE", 7.5),
+        "min_audio_quality_score": _get_score("MIN_AUDIO_QUALITY_SCORE", 8.0),
+        "min_video_quality_score": _get_score("MIN_VIDEO_QUALITY_SCORE", 8.0),
+        "max_uploads_per_day": _get_int("MAX_UPLOADS_PER_DAY", 5, 1, 100),
+        "insert_quota_units": 1600,
+        "daily_quota_units": _get_int("YOUTUBE_DAILY_QUOTA_UNITS", 10000, 1600, 1000000),
+        "category_id": category_id,
+        "playlist_id": os.getenv("YOUTUBE_PLAYLIST_ID", "").strip(),
+        "notify_subscribers": _get_bool("YOUTUBE_NOTIFY_SUBSCRIBERS", True),
+        "made_for_kids": _get_bool("YOUTUBE_MADE_FOR_KIDS", False),
+    }
+
+
+def _get_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name, str(default)).strip().lower()
+    if value not in {"true", "false", "1", "0", "yes", "no"}:
+        raise ValueError(f"{name} must be a boolean value.")
+    return value in {"true", "1", "yes"}
+
+
+def _get_score(name: str, default: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except ValueError as error:
+        raise ValueError(f"{name} must be a number between 0 and 10.") from error
+    if not 0 <= value <= 10:
+        raise ValueError(f"{name} must be a number between 0 and 10.")
+    return value
+
+
+def _get_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError as error:
+        raise ValueError(f"{name} must be an integer from {minimum} to {maximum}.") from error
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be an integer from {minimum} to {maximum}.")
+    return value
+
+
 def get_youtube_callback_uri() -> str:
     """Return the exact OAuth callback registered in the Google Cloud project."""
     callback_uri = os.getenv(
@@ -105,4 +162,21 @@ def get_hf_settings() -> dict[str, str]:
     return {
         "model": os.getenv("HF_MODEL", "").strip(),
         "provider": os.getenv("HF_PROVIDER", "auto").strip() or "auto",
+    }
+
+
+def get_llm_provider() -> str:
+    """Return the configured LLM backend, defaulting to Sarvam."""
+    provider = os.getenv("LLM_PROVIDER", "sarvam").strip().lower()
+    if provider not in {"huggingface", "sarvam"}:
+        raise ValueError("LLM_PROVIDER must be 'huggingface' or 'sarvam'.")
+    return provider
+
+
+def get_sarvam_settings() -> dict[str, str]:
+    """Return Sarvam connection settings, including its locally configured key."""
+    return {
+        "api_key": os.getenv("SARVAM_API_KEY", "").strip(),
+        "base_url": os.getenv("SARVAM_BASE_URL", "https://api.sarvam.ai/v1").strip(),
+        "model": os.getenv("SARVAM_MODEL_NAME", "sarvam-105b").strip(),
     }

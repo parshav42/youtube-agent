@@ -15,6 +15,7 @@ from app.database.db import (
     update_production,
 )
 from app.providers.huggingface_llm import HuggingFaceLLMProvider
+from app.providers.llm_factory import build_llm_provider
 from app.schemas.script_schema import MotivationalScript, ScriptEvaluation
 from app.video.subtitle_engine import generate_srt
 from app.video.tts_engine import build_tts_provider, validate_audio
@@ -111,7 +112,7 @@ class ProductionService:
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
             self.assembler.ensure_available()
-            llm_provider = self.llm_provider or HuggingFaceLLMProvider.from_environment()
+            llm_provider = self.llm_provider or build_llm_provider()
             metadata_output = generate_metadata(script, llm_provider)
             metadata["model_provider"] = llm_provider.provider_name
             metadata["model_identifier"] = llm_provider.model

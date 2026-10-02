@@ -1,4 +1,4 @@
-"""CLI for Hugging Face-backed scripts, Day 1 research, and video production."""
+"""CLI for configured-LLM scripts, Day 1 research, and video production."""
 
 import argparse
 import json
@@ -10,6 +10,7 @@ from app.config import get_database_path, get_niche, get_quality_threshold, get_
 from app.database.db import get_latest_research, initialize_database
 from app.graph.workflow import build_workflow
 from app.providers.huggingface_llm import HuggingFaceLLMProvider
+from app.providers.llm_factory import build_llm_provider
 from app.schemas.script_schema import ScriptRequest
 
 
@@ -26,7 +27,8 @@ def main() -> int:
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--research", action="store_true", help="Run the bundled Day 1 sample-topic workflow.")
     modes.add_argument(
-        "--research-with-hf", action="store_true", help="Generate research ideas using configured Hugging Face inference."
+        "--research-with-hf", "--research-live", dest="research_with_hf", action="store_true",
+        help="Generate research ideas using the configured live LLM provider."
     )
     modes.add_argument("--check-hf", action="store_true", help="Make and print a real HF model inference request.")
     modes.add_argument(
@@ -52,10 +54,10 @@ def main() -> int:
         if args.research_with_hf:
             try:
                 research_provider = HuggingFaceResearchProvider(
-                    HuggingFaceLLMProvider.from_environment()
+                    build_llm_provider()
                 )
             except Exception as error:
-                print(f"Hugging Face research unavailable: {error}", file=sys.stderr)
+                print(f"Live LLM research unavailable: {error}", file=sys.stderr)
                 return 1
         workflow = build_workflow(
             research_provider=research_provider,
@@ -104,7 +106,7 @@ def main() -> int:
             f"     Caption: {scene.caption}\n"
             f"     Transition: {scene.transition} | Audio: {scene.audio_direction}"
         )
-    print("Quality evaluation (heuristic and HF review; not an engagement prediction):")
+    print("Quality evaluation (heuristic and LLM review; not an engagement prediction):")
     print(json.dumps(result["evaluation"].model_dump(mode="json"), ensure_ascii=False, indent=2))
     record = result.get("script_record")
     print(f"Database record ID: {record['id'] if record else 'not saved'}")

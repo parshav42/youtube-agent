@@ -398,6 +398,7 @@ def test_audio_qa_failure_blocks_visual_acquisition_and_rendering(tmp_path, monk
 
 
 def test_missing_hf_configuration_is_persisted_without_fake_audio(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "huggingface")
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HF_MODEL", raising=False)
     database_path = tmp_path / "no-hf.sqlite3"

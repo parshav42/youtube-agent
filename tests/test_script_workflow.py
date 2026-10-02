@@ -104,6 +104,7 @@ def test_revision_attempts_are_bounded_and_failed_script_is_marked_for_review(tm
 
 
 def test_missing_hf_credentials_do_not_silently_select_a_mock(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "huggingface")
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HF_MODEL", raising=False)
 

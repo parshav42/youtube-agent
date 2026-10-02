@@ -2,22 +2,28 @@
 
 MotivationOS builds original Hindi-English motivational Shorts. Day 1 research and Day 2 script generation remain in LangGraph; Day 3 adds real audio, licensed visual acquisition, subtitles, video rendering, and resumable production records.
 
+## LLM providers
+
+Sarvam is the default backend, using `sarvam-105b` for chat completions. Set `LLM_PROVIDER=sarvam` and `SARVAM_API_KEY` in your ignored local `.env`; `SARVAM_BASE_URL` defaults to `https://api.sarvam.ai/v1` and `SARVAM_MODEL_NAME` to `sarvam-105b`. Get an API key from the Sarvam AI developer console. The provider supports structured JSON generation used by script writing, scene planning, revision, and quality review.
+
+To use Hugging Face instead, set `LLM_PROVIDER=huggingface`, then configure `HF_TOKEN`, `HF_MODEL`, and optionally `HF_PROVIDER`. HF timeout and retry settings continue to apply to that provider only. Copy the provider settings from `.env.example`; never commit `.env`.
+
 ## Architecture
 
-The typed LangGraph retains its original research route and selects the script path for a `script_request` or `selected_topic`. All LLM calls use the centralized `HuggingFaceLLMProvider` and the official `huggingface_hub.InferenceClient`; the application has no OpenAI integration or implicit mock fallback.
+The typed LangGraph retains its original research route and selects the script path for a `script_request` or `selected_topic`. All LLM calls use the centralized provider interface and the backend selected by `LLM_PROVIDER`; there is no implicit mock fallback.
 
 ```mermaid
 flowchart TD
     START([START]) --> route{Input}
-    route -->|Research| hf_research[HF research or labeled Day 1 sample ideas]
+    route -->|Research| llm_research[Configured LLM research or labeled Day 1 sample ideas]
     hf_research --> scoring --> selection --> research_db[(SQLite research_runs)]
-    route -->|Script request| generation[HF structured script generation]
+    route -->|Script request| generation[Structured script generation]
     generation --> story[HF story structure]
-    story --> scenes[HF scene planning]
-    scenes --> quality[HF qualitative review + deterministic checks]
+    story --> scenes[Scene planning]
+    scenes --> quality[LLM review + deterministic checks]
     quality -->|Fail, up to 2 revisions| generation
     quality -->|Approved| scripts_db[(SQLite scripts)]
-    scripts_db --> metadata[HF production metadata]
+    scripts_db --> metadata[LLM production metadata]
     metadata --> tts[ElevenLabs or explicitly selected Edge TTS]
     tts --> visuals[Licensed local scene assets]
     visuals --> subtitles[Approximate phrase SRT]
@@ -26,7 +32,7 @@ flowchart TD
     media --> production_db[(SQLite productions)]
 ```
 
-Research, story planning, scene planning, script generation, quality review, and video metadata share Hugging Face. Static Day 1 seed research is a separately labeled source and is not an LLM fallback. TTS and visual sourcing are independent media providers.
+Research, story planning, scene planning, script generation, quality review, and video metadata share the configured LLM provider. Static Day 1 seed research is a separately labeled source and is not an LLM fallback. TTS and visual sourcing are independent media providers.
 
 ## Install
 
@@ -44,9 +50,9 @@ On Debian/Ubuntu, install the media tools with `sudo apt install ffmpeg fonts-no
 
 ## Configuration
 
-### Hugging Face LLM
+### Hugging Face settings
 
-- `HF_TOKEN` is required for script generation, HF research, story/scene planning, quality review, metadata, and `--check-hf`. Create a Hugging Face user token with access to Inference Providers and keep it in your ignored local `.env`.
+- These settings are used only when `LLM_PROVIDER=huggingface`, or for the explicit `--check-hf` connectivity command. Create a Hugging Face user token with access to Inference Providers and keep it in your ignored local `.env`.
 - `HF_MODEL` is the exact model repository/identifier supported by an available Inference Provider.
 - `HF_PROVIDER` selects a supported Inference Provider or `auto`.
 - `HF_TIMEOUT_SECONDS` and `HF_MAX_RETRIES` bound request time and retries; authentication and missing-model errors fail with configuration guidance.
@@ -63,10 +69,19 @@ python -m app.main --check-hf
 The local FastAPI service uses Google's official YouTube Data API v3 and YouTube Analytics API. It does not change or replace the Day 1–3 LangGraph/video workflows.
 
 - In Google Cloud, enable **YouTube Data API v3** and **YouTube Analytics API**, configure the OAuth consent screen, and add the channel owner as a test user where applicable. Do not bypass Google's verification or app restrictions.
+- Use one Google Cloud API project for this API client. Configure the OAuth consent screen's app name, support/developer contacts, authorized domain, homepage, and public privacy policy. Publish the consent screen only after completing any required OAuth verification for the requested scopes; an External app left in Testing is limited to test users and may have short-lived refresh tokens.
 - Create an OAuth **Web application** client with the exact authorized redirect URI `http://127.0.0.1:8000/api/youtube/auth/callback`; set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. The current callback validator is local-only. Use HTTPS and a hardened callback/auth boundary before non-local deployment.
 - Set `GOOGLE_TOKEN_ENCRYPTION_KEY` to a Fernet key generated locally, for example with `.venv/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'`. It encrypts OAuth credentials and resumable upload session URLs in SQLite. Back it up securely; losing/rotating it requires Google reauthorization and prevents resuming saved upload sessions.
 - Set `MOTIVATIONOS_ADMIN_TOKEN` to a locally generated high-entropy secret. Every administrative route requires it as a Bearer token. Keep the API bound to loopback; do not expose it publicly without TLS and a hardened authentication/deployment boundary. The OAuth callback carries a one-time authorization code in its query string; disable Uvicorn access logging and configure any reverse proxy to redact callback query strings.
-- The OAuth flow requests only `youtube.upload`, `youtube.readonly`, and `yt-analytics.readonly`. Google may require consent-screen setup, test-user access, verification, or reauthorization depending on project state and account policy. OAuth Testing mode may restrict refresh-token lifetime; monitor `/api/youtube/status` and reauthorize when required.
+- The OAuth flow requests `youtube.upload`, `youtube.force-ssl` (playlist writes), `youtube.readonly`, and `yt-analytics.readonly`. These scopes authorize upload, optional playlist insertion, channel identity checks, and analytics. Request consent with the channel owner account and reauthorize after changing scopes. Google OAuth app verification and the YouTube API Services compliance audit are separate processes; complete whichever Google requires for this project's consent screen and intended publishing use.
+
+#### Google audit, quota, and public visibility
+
+YouTube Data API v3 and YouTube Analytics API must be enabled in the same project as the OAuth client. Google OAuth scope verification does not replace the **YouTube API Services audit**. YouTube may force API uploads to `private` for an unaudited/restricted project. MotivationOS verifies the returned and read-back privacy status and marks a public request as failed if YouTube returns private; it will not relabel that upload public or report success. Do not retry by switching projects, credentials, or upload methods to evade the restriction.
+
+For public production use, submit the [YouTube API Services Audit and Quota Extension form](https://support.google.com/youtube/contact/yt_api_form), describe the real MotivationOS upload flow, provide requested policy/privacy materials and an access path for review, and wait for YouTube API Services approval. Separately complete any [Google OAuth app verification](https://support.google.com/cloud/answer/9110914) required for the consent-screen scopes: configure app branding, authorized domains, homepage and privacy policy; verify domain ownership; provide a demo and scope justification; and submit the consent screen for verification. Keep the app in Testing with the channel owner as a test user while developing. Approval is controlled by Google and is not guaranteed by these code changes.
+
+Google's current quota documentation (checked 2026-10-02) lists a default 100 `videos.insert` calls/day, a separate 100 `search.list` calls/day, and 10,000 quota units/day shared by other methods; `videos.insert` currently costs 1 unit. Quotas reset at midnight Pacific Time. The scheduler additionally reserves a conservative **1,600 internal budget units per upload attempt**, as requested, and enforces `MAX_UPLOADS_PER_DAY`; this is an application safety estimate, not Google's current method charge. Optional thumbnail and playlist calls also consume Google quota. Check actual usage and project-specific limits in [Cloud Console Quotas](https://console.cloud.google.com/iam-admin/quotas). To request more quota, first complete the YouTube API Services compliance audit, then submit the official quota extension form with the approved use case. Never assume an extension is approved until it appears in the project.
 
 Start the local API:
 
@@ -77,7 +92,22 @@ set -a; . ./.env; set +a
 
 Call `GET /api/youtube/auth/start` with the admin Bearer token, visit its returned authorization URL, and complete consent. The loopback callback validates single-use OAuth state and PKCE, then stores encrypted credentials. `/api/youtube/status` reports configuration/connection state without returning tokens.
 
-Publishing requires three separate human actions. A completed production must have its actual `final.mp4` and Day 3 `metadata.json`. `POST /api/publishing/{production_id}/review` validates both and snapshots the generated title, description, tags, language, and category for inspection. `POST /api/publishing/{production_id}/approve` requires `{"confirm_approval":true}`; public visibility additionally requires `{"confirm_public":true}`. Only then can `POST /api/publishing/{production_id}/upload` upload. Visibility defaults to private, and public publishing is never scheduled. An upload is reported as successful only after YouTube returns a video ID.
+#### Manual and automatic operation
+
+Manual mode remains the default (`AUTO_PUBLISH_ENABLED=false`). A completed production must have its actual `final.mp4` and Day 3 `metadata.json`. `POST /api/publishing/{production_id}/review` validates both and snapshots generated title, description, tags, language, and category. `POST /api/publishing/{production_id}/approve` requires `{"confirm_approval":true}`; public visibility additionally requires `{"confirm_public":true}`. Only then can `POST /api/publishing/{production_id}/upload` upload. Visibility defaults to private for manual review. An upload is successful only after YouTube returns a video ID and its remote visibility/channel are verified.
+
+Automatic mode requires explicit channel-owner consent and both flags below. It runs under the FastAPI process when `AUTO_PUBLISH_ENABLED=true`; the scheduler is started automatically. `MOTIVATIONOS_SCHEDULER_ENABLED=true` remains available for the daily report job. Configure credentials, licensed assets and working HF/TTS/media providers before enabling it:
+
+```dotenv
+AUTO_PUBLISH_ENABLED=true
+AUTO_PUBLISH_CRON=0 9 * * *
+YOUTUBE_PRIVACY_STATUS=public
+AUTO_APPROVE_SCRIPTS=true
+AUTO_APPROVE_PRODUCTIONS=true
+MAX_UPLOADS_PER_DAY=5
+```
+
+The pipeline performs live topic research, script generation/evaluation, optional configured script approval, production, audio/video QA, provenance and file-hash checks, metadata validation, channel identity verification, and a public resumable upload. A failed gate remains in `needs_review` with reason codes; setting either auto-approval flag to false preserves manual review at that stage. Audio/video reports are categorical technical QA; a pass maps to the configured 0-10 threshold's maximum score because those engines do not produce numeric ratings. A public upload is never silently downgraded to private. `YOUTUBE_NOTIFY_SUBSCRIBERS`, `YOUTUBE_CATEGORY_ID`, `YOUTUBE_PLAYLIST_ID`, and `YOUTUBE_MADE_FOR_KIDS` control the insert and optional post-upload actions.
 
 Uploads use the official resumable MediaUpload API. Each production has a unique upload record, and its ID is embedded as a description reconciliation marker. Interrupted sessions resume with the encrypted saved session URL. If the outcome is ambiguous and no resumable URL exists, automatic re-upload is blocked. `POST /api/publishing/{production_id}/reconcile` searches the authenticated channel for that exact marker and persists an ID only when exactly one match is returned. No match does not authorize automatic re-upload. Inspect durable state at `/api/publishing/{production_id}/status`; cancellation retains its audit record.
 
@@ -85,9 +115,20 @@ Uploads use the official resumable MediaUpload API. Each production has a unique
 
 `POST /api/reports/daily` saves Markdown under `MOTIVATIONOS_REPORT_DIR` (default `data/reports/`) before attempting email. Configure `SMTP_HOST`, `EMAIL_FROM`, `EMAIL_TO`, and, if required, `SMTP_USERNAME`/`SMTP_PASSWORD`; port 587 uses STARTTLS and 465 uses implicit TLS. If email settings are missing, the local report is still saved and email is `not_configured`. SMTP acceptance does not guarantee inbox delivery. An interrupted send is marked `delivery_unknown` and is not resent automatically.
 
-Set `MOTIVATIONOS_SCHEDULER_ENABLED=true` to start the in-process UTC daily analytics/report job (default 08:00 UTC). It never uploads or publishes. SQLite stores job claims and limits retries to three; duplicate daily executions are blocked. The API also exposes an authenticated manual trigger. All new tables are additive; existing production, script, and research rows are retained.
+Set `MOTIVATIONOS_SCHEDULER_ENABLED=true` to start the in-process UTC daily analytics/report job (default 08:00 UTC). When auto-publishing is enabled, its configured cron job shares the process but uses durable SQLite claims, upload leases, resumable session URLs, per-production uniqueness, quota reservations, and retry/backoff state. Uploads that cannot be safely reconciled are blocked rather than duplicated. All schema changes are additive; existing production, script, and research rows are retained.
 
-Google enforces project-level API quotas, OAuth consent/testing policies, channel permissions, and upload restrictions. Check current quota in Google Cloud Console before production use. Unverified YouTube API projects may be restricted to private visibility; respect the current project-specific restriction and API terms. Quota exhaustion, API enablement errors, delayed metrics, or revoked credentials are surfaced as failures, not successful operations.
+Google enforces project-level API quotas, OAuth consent/testing policies, channel permissions, and upload restrictions. Check current quota in Cloud Console before production use. If a public upload is returned as private, the job fails with an audit/restriction diagnostic and records no successful public URL. Do not enable unattended publishing until the authorized channel owner has explicitly reviewed and consented to the public-upload schedule, visibility, subscriber notifications, and metadata behavior.
+
+#### Live runbook
+
+1. Complete Google Cloud project setup, OAuth verification if required, and the YouTube API Services audit. Confirm the channel's project is permitted to publish publicly.
+2. Fill `.env` from `.env.example`, including client credentials, encryption key, admin token, HF/TTS settings, licensed asset provenance, and the auto-publish policy. Keep secrets local; never commit `.env`.
+3. Start the local API using the command above, authenticate the channel owner through `/api/youtube/auth/start`, then confirm `/api/youtube/status` is connected and reports the expected scopes.
+4. Begin in manual mode. Generate and review a real production; use the publishing review/approval API to approve it as `public` for the verified channel. Check the channel ID, title, description, category, audience setting, and notification choice before sending.
+5. Run `.venv/bin/python scripts/live_publish_smoke.py PRODUCTION_ID` only after setting `RUN_LIVE_YOUTUBE=1` in the environment. It uploads through the official resumable API and prints the recorded URL; an existing URL is returned without another insert. Open the URL in a signed-out/private browser window and confirm it is publicly viewable, then confirm its `video_id`, `video_url`, `visibility`, and `uploaded_at` in `/api/publishing/PRODUCTION_ID/status` and the daily report.
+6. After manual smoke verification, explicitly enable both `AUTO_APPROVE_SCRIPTS` and `AUTO_APPROVE_PRODUCTIONS` only if the owner approves unattended use. Set `AUTO_PUBLISH_ENABLED=true`, inspect cron and upload caps, and monitor daily reports, review queues, quota, and failures.
+
+An actual public live smoke upload was not run as part of offline tests. Google project approval, OAuth consent and channel permissions are external prerequisites; an unaudited project may remain private-only even with valid credentials.
 
 ### Narration
 

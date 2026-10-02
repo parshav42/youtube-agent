@@ -5,6 +5,7 @@ from typing import Protocol
 
 from app.config import get_speaking_rate_wps
 from app.providers.huggingface_llm import HuggingFaceLLMProvider
+from app.providers.llm_factory import build_llm_provider
 from app.schemas.script_schema import (
     MotivationalScript,
     ScriptDraft,
@@ -226,5 +227,5 @@ class MockScriptGenerator:
 def build_script_generator(
     provider: HuggingFaceLLMProvider | None = None,
 ) -> HuggingFaceScriptGenerator:
-    """Construct the production generator; missing HF configuration is an error."""
-    return HuggingFaceScriptGenerator(provider or HuggingFaceLLMProvider.from_environment())
+    """Construct the production generator; missing provider configuration is an error."""
+    return HuggingFaceScriptGenerator(provider or build_llm_provider())

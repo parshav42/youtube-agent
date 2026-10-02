@@ -1,6 +1,7 @@
 """Human-approved, resumable YouTube Data API uploads."""
 
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,7 +9,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.config import get_database_path, get_youtube_visibility
+from app.config import get_auto_publish_settings, get_database_path, get_youtube_visibility
 from app.database.db import get_production_by_id
 from app.schemas.script_schema import ProductionMetadata
 from app.video.video_assembler import validate_video
@@ -76,13 +77,46 @@ class YouTubePublisher:
         oauth: GoogleOAuthService | None = None,
         api_builder: Callable[..., Any] | None = None,
         media_upload_factory: Callable[..., Any] | None = None,
+        thumbnail_upload_factory: Callable[..., Any] | None = None,
         video_validator: Callable[[str | Path], dict[str, Any]] = validate_video,
     ) -> None:
         self.database_path = database_path or get_database_path()
         self.oauth = oauth or GoogleOAuthService(str(self.database_path))
         self.api_builder = api_builder or self._build_api
         self.media_upload_factory = media_upload_factory or self._media_upload
+        self.thumbnail_upload_factory = thumbnail_upload_factory or self._thumbnail_upload
         self.video_validator = video_validator
+
+    def approve_automatically(self, production_id: str) -> dict[str, Any]:
+        """Approve public publishing only when both explicit automation flags are enabled."""
+        settings = get_auto_publish_settings()
+        if not settings["enabled"] or not settings["auto_approve_productions"]:
+            raise YouTubePublishError("Automatic production approval is disabled by configuration.")
+        if settings["privacy_status"] != "public":
+            raise YouTubePublishError("Automatic publishing requires YOUTUBE_PRIVACY_STATUS=public.")
+        existing = get_approval(production_id, self.database_path)
+        if existing is None:
+            self.request_review(production_id, visibility="public")
+        elif existing["state"] != "awaiting_review":
+            raise YouTubePublishError(
+                f"Automatic publishing cannot approve from state {existing['state']!r}."
+            )
+        try:
+            service = self.api_builder(self.oauth.authorized_credentials())
+            channel_id = self._authenticated_channel_id(service)
+        except Exception as error:
+            raise YouTubePublishError(
+                "Automatic publishing cannot verify the authorized YouTube channel; complete OAuth and reconnect."
+            ) from error
+        if not channel_id:
+            raise YouTubePublishError("Automatic publishing could not identify the authorized YouTube channel.")
+        return self.approve(
+            production_id,
+            channel_id=channel_id,
+            visibility="public",
+            self_declared_made_for_kids=bool(settings["made_for_kids"]),
+            confirm_public=True,
+        )
 
     def request_review(
         self,
@@ -98,6 +132,13 @@ class YouTubePublisher:
                 "A publishing review or upload record already exists for this production."
             )
         metadata = self._load_metadata(production)
+        metadata = metadata.model_copy(
+            update={
+                "description": self._description_with_reference(
+                    metadata.description, production_id
+                )
+            }
+        )
         target_visibility = visibility or get_youtube_visibility()
         if target_visibility not in {"private", "unlisted", "public"}:
             raise YouTubePublishError("Publishing visibility must be private, unlisted, or public.")
@@ -228,11 +269,10 @@ class YouTubePublisher:
         request: Any | None = None
         upload_started = False
         try:
-            description = self._description_with_reference(metadata.description, production_id)
             body = {
                 "snippet": {
                     "title": metadata.title,
-                    "description": description,
+                    "description": metadata.description,
                     "tags": metadata.tags,
                     "categoryId": metadata.category_id,
                     "defaultLanguage": metadata.language,
@@ -244,7 +284,10 @@ class YouTubePublisher:
             }
             media_body = self.media_upload_factory(video_path)
             request = service.videos().insert(
-                part="snippet,status", body=body, media_body=media_body
+                part="snippet,status",
+                body=body,
+                media_body=media_body,
+                notifySubscribers=bool(get_auto_publish_settings()["notify_subscribers"]),
             )
             if upload.get("resumable_uri"):
                 request.resumable_uri = self.oauth.decrypt_persistent_secret(
@@ -268,7 +311,7 @@ class YouTubePublisher:
             video_id = self._validate_upload_result(response, approval)
             self._verify_remote_upload(service, video_id, approval)
             final_status = "uploaded_private" if approval["visibility"] == "private" else "uploaded"
-            return update_upload_progress(
+            saved = update_upload_progress(
                 production_id,
                 status=final_status,
                 video_id=video_id,
@@ -276,6 +319,9 @@ class YouTubePublisher:
                 visibility=approval["visibility"],
                 database_path=self.database_path,
             )
+            extras = self._post_upload_extras(service, video_id, production)
+            saved["post_upload"] = extras
+            return saved
         except Exception as error:
             resumable_uri = getattr(request, "resumable_uri", None) if request is not None else None
             if isinstance(error, _UnverifiedUploadResult):
@@ -301,7 +347,13 @@ class YouTubePublisher:
                 self.oauth.mark_reauthorization_required()
                 detail = "Google authorization expired or was revoked; reconnect the YouTube account."
             elif http_status == 403:
-                detail = "YouTube denied the upload; check channel permission, API project restrictions, and quota."
+                reason = self._api_error_reason(error)
+                if reason in {"quotaExceeded", "dailyLimitExceeded", "uploadLimitExceeded"}:
+                    detail = "YouTube API quota is exhausted; the next safe retry is after Google's quota reset (midnight Pacific Time)."
+                elif self._is_public_upload_restriction(error):
+                    detail = "Google blocked public uploads for this YouTube API project. Complete the required YouTube API Services audit and OAuth/project verification before retrying."
+                else:
+                    detail = "YouTube denied the upload; check channel permission, API project restrictions, and quota."
             elif http_status == 429:
                 detail = "YouTube upload quota or rate limit was reached; retry after its reset."
             else:
@@ -582,6 +634,11 @@ class YouTubePublisher:
             raise _UnverifiedUploadResult(YouTubePublisher._safe_upload_result_summary(response))
         status = response.get("status")
         privacy_status = status.get("privacyStatus") if isinstance(status, dict) else None
+        if approval.get("visibility") == "public" and privacy_status == "private":
+            raise _UnverifiedUploadResult(
+                YouTubePublisher._safe_upload_result_summary(response),
+                "Google restricted this upload to private. Public uploads require an eligible YouTube API OAuth project and the required audit; complete Google's YouTube API Services audit and verify the channel's project before retrying.",
+            )
         if (
             privacy_status not in {"private", "unlisted", "public"}
             or privacy_status != approval.get("visibility")
@@ -644,6 +701,34 @@ class YouTubePublisher:
             summary["audience_status"] = audience_status
         return summary
 
+    @staticmethod
+    def _api_error_reason(error: Exception) -> str | None:
+        content = getattr(error, "content", None)
+        if not isinstance(content, bytes):
+            return None
+        try:
+            details = json.loads(content).get("error", {}).get("errors", [])
+        except (json.JSONDecodeError, AttributeError):
+            return None
+        return details[0].get("reason") if details and isinstance(details[0], dict) else None
+
+    @staticmethod
+    def _is_public_upload_restriction(error: Exception) -> bool:
+        content = getattr(error, "content", None)
+        if not isinstance(content, bytes):
+            return False
+        try:
+            payload = json.loads(content).get("error", {})
+        except (json.JSONDecodeError, AttributeError):
+            return False
+        message = payload.get("message", "") if isinstance(payload, dict) else ""
+        reason = YouTubePublisher._api_error_reason(error)
+        diagnostic = f"{reason or ''} {message}".casefold()
+        return any(
+            term in diagnostic
+            for term in ("audit", "unverified", "private-only", "public upload restriction")
+        )
+
     def _load_metadata(self, production: dict[str, Any]) -> PublishingMetadata:
         artifact_path = Path(production["output_dir"]) / "metadata.json"
         try:
@@ -673,7 +758,7 @@ class YouTubePublisher:
                     "description": normalized.description,
                     "tags": tags,
                     "language": language,
-                    "category_id": normalized.category_id,
+                    "category_id": os.getenv("YOUTUBE_CATEGORY_ID", normalized.category_id).strip(),
                     "publishing_notes": normalized.publishing_notes,
                 }
             )
@@ -712,10 +797,13 @@ class YouTubePublisher:
 
     @staticmethod
     def _description_with_reference(description: str, production_id: str) -> str:
-        reference = f"\n\nMotivationOS production reference: {production_id}"
-        if len(description) + len(reference) > 5000:
+        shorts = "" if "#shorts" in description.casefold() else "\n#Shorts"
+        marker_text = f"MotivationOS production reference: {production_id}"
+        marker = "" if marker_text in description else f"\n{marker_text}"
+        addition = ("\n" if description and (shorts or marker) else "") + shorts + marker
+        if len(description) + len(addition) > 5000:
             raise YouTubePublishError("Description plus reconciliation reference exceeds YouTube's limit.")
-        return description + reference
+        return description + addition
 
     @staticmethod
     def _language_code(language: str) -> str:
@@ -766,3 +854,54 @@ class YouTubePublisher:
         from googleapiclient.http import MediaFileUpload
 
         return MediaFileUpload(str(path), mimetype="video/mp4", chunksize=8 * 1024 * 1024, resumable=True)
+
+    def _post_upload_extras(
+        self,
+        service: Any,
+        video_id: str,
+        production: dict[str, Any],
+    ) -> dict[str, str]:
+        """Apply optional thumbnail/playlist operations after the insert is safely recorded."""
+        settings = get_auto_publish_settings()
+        outcomes: dict[str, str] = {}
+        metadata = production.get("metadata", {})
+        thumbnail = metadata.get("thumbnail") if isinstance(metadata, dict) else None
+        thumbnail_path = thumbnail.get("path") if isinstance(thumbnail, dict) else None
+        root = Path(production["output_dir"]).resolve()
+        resolved = Path(thumbnail_path).resolve() if isinstance(thumbnail_path, str) else None
+        if (
+            resolved is not None
+            and root in resolved.parents
+            and resolved.is_file()
+            and resolved.suffix.lower() in {".jpg", ".jpeg", ".png"}
+            and resolved.stat().st_size <= 2 * 1024 * 1024
+        ):
+            try:
+                service.thumbnails().set(
+                    videoId=video_id,
+                    media_body=self.thumbnail_upload_factory(resolved),
+                ).execute(num_retries=2)
+                outcomes["thumbnail"] = "uploaded"
+            except Exception:
+                outcomes["thumbnail"] = "failed"
+        playlist_id = str(settings["playlist_id"])
+        if playlist_id:
+            try:
+                service.playlistItems().insert(
+                    part="snippet",
+                    body={"snippet": {
+                        "playlistId": playlist_id,
+                        "resourceId": {"kind": "youtube#video", "videoId": video_id},
+                    }},
+                ).execute(num_retries=2)
+                outcomes["playlist"] = "added"
+            except Exception:
+                outcomes["playlist"] = "failed"
+        return outcomes
+
+    @staticmethod
+    def _thumbnail_upload(path: Path) -> Any:
+        from googleapiclient.http import MediaFileUpload
+
+        mimetype = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+        return MediaFileUpload(str(path), mimetype=mimetype, resumable=False)

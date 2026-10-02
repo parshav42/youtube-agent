@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app.database.db import _connection, initialize_database
 
@@ -76,7 +77,9 @@ def initialize_youtube_database(database_path: str | Path | None = None) -> None
         connection.execute(
             """CREATE TABLE IF NOT EXISTS youtube_uploads (
                 production_id TEXT PRIMARY KEY REFERENCES productions(id),
+                channel_id TEXT,
                 video_id TEXT UNIQUE,
+                video_url TEXT,
                 status TEXT NOT NULL CHECK (status IN (
                     'awaiting_review', 'approved', 'uploading',
                     'uploaded_private', 'uploaded', 'failed', 'cancelled'
@@ -87,7 +90,40 @@ def initialize_youtube_database(database_path: str | Path | None = None) -> None
                 lease_until TEXT,
                 api_response_json TEXT,
                 error TEXT,
+                retry_after TEXT,
                 uploaded_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )"""
+        )
+        upload_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(youtube_uploads)")
+        }
+        for column, declaration in (
+            ("channel_id", "TEXT"),
+            ("video_url", "TEXT"),
+            ("retry_after", "TEXT"),
+        ):
+            if column not in upload_columns:
+                connection.execute(f"ALTER TABLE youtube_uploads ADD COLUMN {column} {declaration}")
+        connection.execute(
+            """UPDATE youtube_uploads SET channel_id = (
+                SELECT approved_channel_id FROM publishing_approvals
+                WHERE publishing_approvals.production_id = youtube_uploads.production_id
+            ) WHERE channel_id IS NULL"""
+        )
+        connection.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS uq_youtube_upload_production_channel
+            ON youtube_uploads (production_id, channel_id) WHERE channel_id IS NOT NULL"""
+        )
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS youtube_quota_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                quota_date TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                production_id TEXT NOT NULL REFERENCES productions(id),
+                quota_units INTEGER NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('reserved', 'succeeded', 'failed')),
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )"""
@@ -279,6 +315,10 @@ def approve_production(
             ON CONFLICT(production_id) DO UPDATE SET status = 'approved', visibility = excluded.visibility,
                 error = NULL, updated_at = excluded.updated_at""",
             (production_id, visibility, now, now),
+        )
+        connection.execute(
+            "UPDATE youtube_uploads SET channel_id = ? WHERE production_id = ?",
+            (approved_channel_id, production_id),
         )
     approval = get_approval(production_id, database_path)
     if approval is None:
@@ -497,6 +537,7 @@ def update_upload_progress(
     error: str | None = None,
     visibility: str | None = None,
     clear_resumable_uri: bool = False,
+    channel_id: str | None = None,
     database_path: str | Path | None = None,
 ) -> dict[str, Any]:
     if status not in {"awaiting_review", "approved", "uploading", "uploaded_private", "uploaded", "failed", "cancelled"}:
@@ -537,6 +578,16 @@ def update_upload_progress(
                 error = ?, updated_at = ? WHERE production_id = ?""",
             (status, visibility, error, now, production_id),
         )
+        if video_id:
+            connection.execute(
+                "UPDATE youtube_uploads SET video_url = ? WHERE production_id = ?",
+                (f"https://www.youtube.com/watch?v={video_id}", production_id),
+            )
+        if channel_id:
+            connection.execute(
+                "UPDATE youtube_uploads SET channel_id = ? WHERE production_id = ?",
+                (channel_id, production_id),
+            )
     result = get_upload(production_id, database_path)
     if result is None:
         raise ValueError(f"Upload record not found for production {production_id}.")
@@ -564,6 +615,25 @@ def get_productions_for_report(
         item["metadata"] = json.loads(item.pop("metadata_json"))
         records.append(item)
     return records
+
+
+def get_uploads_for_report(
+    start_at: str,
+    end_at: str,
+    database_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    initialize_youtube_database(database_path)
+    with _connection(database_path) as connection:
+        rows = connection.execute(
+            """SELECT u.production_id, u.video_id, u.video_url, u.status,
+                u.visibility, u.error, u.uploaded_at
+            FROM youtube_uploads AS u
+            WHERE (u.uploaded_at >= ? AND u.uploaded_at < ?)
+                OR (u.status = 'failed' AND u.updated_at >= ? AND u.updated_at < ?)
+            ORDER BY u.updated_at""",
+            (start_at, end_at, start_at, end_at),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def save_analytics(
@@ -715,3 +785,202 @@ def get_job_execution(
             (job_name, run_date),
         ).fetchone()
     return dict(row) if row else None
+
+
+class QuotaBudgetExceeded(RuntimeError):
+    """Raised when the configured per-day upload or quota budget is exhausted."""
+
+
+def get_approved_scripts_without_productions(
+    database_path: str | Path | None = None,
+    *,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    from app.database.db import get_script_by_id
+
+    initialize_youtube_database(database_path)
+    with _connection(database_path) as connection:
+        rows = connection.execute(
+            """SELECT s.id FROM scripts AS s
+            WHERE s.status = 'approved' AND NOT EXISTS (
+                SELECT 1 FROM productions AS p WHERE p.script_id = s.id
+            ) ORDER BY s.created_at, s.id LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [
+        record
+        for row in rows
+        if (record := get_script_by_id(row["id"], database_path)) is not None
+    ]
+
+
+def get_upload_candidates(
+    database_path: str | Path | None = None,
+    *,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    initialize_youtube_database(database_path)
+    with _connection(database_path) as connection:
+        rows = connection.execute(
+            """SELECT u.production_id, u.status, u.channel_id, u.attempt_count,
+                u.resumable_uri, u.retry_after, u.video_id, a.visibility,
+                a.approved_channel_id
+            FROM youtube_uploads AS u
+            JOIN publishing_approvals AS a USING (production_id)
+            WHERE a.visibility = 'public'
+                AND u.status IN ('approved', 'failed', 'uploading')
+                AND u.video_id IS NULL
+            ORDER BY u.created_at, u.production_id LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_auto_approval_candidates(
+    database_path: str | Path | None = None,
+    *,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    initialize_youtube_database(database_path)
+    with _connection(database_path) as connection:
+        rows = connection.execute(
+            """SELECT p.id AS production_id, p.script_id
+            FROM productions AS p
+            LEFT JOIN publishing_approvals AS a ON a.production_id = p.id
+            WHERE p.status = 'completed'
+                AND json_extract(p.metadata_json, '$.auto_approval.status') = 'approved'
+                AND (a.production_id IS NULL OR a.state = 'awaiting_review')
+            ORDER BY p.created_at, p.id LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_review_queue_counts(
+    database_path: str | Path | None = None,
+) -> dict[str, int]:
+    initialize_youtube_database(database_path)
+    with _connection(database_path) as connection:
+        scripts = connection.execute(
+            "SELECT COUNT(*) FROM scripts WHERE status = 'needs_review'"
+        ).fetchone()[0]
+        productions = connection.execute(
+            "SELECT COUNT(*) FROM productions WHERE status = 'needs_review'"
+        ).fetchone()[0]
+    return {"scripts": scripts, "productions": productions, "total": scripts + productions}
+
+
+def reserve_upload_quota(
+    production_id: str,
+    channel_id: str,
+    *,
+    max_uploads: int,
+    quota_units: int = 1600,
+    daily_quota_units: int = 10000,
+    database_path: str | Path | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Atomically reserve quota before invoking the YouTube insert endpoint."""
+    initialize_youtube_database(database_path)
+    moment = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    quota_date = moment.astimezone(ZoneInfo("America/Los_Angeles")).date().isoformat()
+    now_text = moment.isoformat()
+    with _connection(database_path) as connection:
+        existing = connection.execute(
+            """SELECT * FROM youtube_quota_usage
+            WHERE quota_date = ? AND channel_id = ? AND production_id = ?
+            ORDER BY id DESC LIMIT 1""",
+            (quota_date, channel_id, production_id),
+        ).fetchone()
+        if existing is not None and existing["status"] != "failed":
+            return dict(existing)
+        existing_video = connection.execute(
+            "SELECT video_id FROM youtube_uploads WHERE production_id = ?",
+            (production_id,),
+        ).fetchone()
+        if existing_video is None:
+            raise ValueError("A durable upload record is required before reserving quota.")
+        if existing_video["video_id"]:
+            raise ValueError("This production already has a recorded YouTube video ID.")
+        usage = connection.execute(
+            """SELECT COUNT(*) AS attempts, COALESCE(SUM(quota_units), 0) AS units
+            FROM youtube_quota_usage WHERE quota_date = ? AND channel_id = ?""",
+            (quota_date, channel_id),
+        ).fetchone()
+        if usage["attempts"] >= max_uploads:
+            raise QuotaBudgetExceeded("Configured MAX_UPLOADS_PER_DAY has been reached.")
+        if usage["units"] + quota_units > daily_quota_units:
+            raise QuotaBudgetExceeded("Daily YouTube API quota budget is exhausted.")
+        cursor = connection.execute(
+            """INSERT INTO youtube_quota_usage
+            (quota_date, channel_id, production_id, quota_units, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'reserved', ?, ?)""",
+            (quota_date, channel_id, production_id, quota_units, now_text, now_text),
+        )
+        connection.execute(
+            "UPDATE youtube_uploads SET channel_id = ? WHERE production_id = ?",
+            (channel_id, production_id),
+        )
+        row = connection.execute(
+            "SELECT * FROM youtube_quota_usage WHERE id = ?", (cursor.lastrowid,)
+        ).fetchone()
+    return dict(row)
+
+
+def finish_quota_reservation(
+    production_id: str,
+    channel_id: str,
+    status: str,
+    database_path: str | Path | None = None,
+) -> None:
+    if status not in {"succeeded", "failed"}:
+        raise ValueError("Quota reservation status must be succeeded or failed.")
+    with _connection(database_path) as connection:
+        connection.execute(
+            """UPDATE youtube_quota_usage SET status = ?, updated_at = ?
+            WHERE id = (SELECT MAX(id) FROM youtube_quota_usage
+                WHERE production_id = ? AND channel_id = ? AND status = 'reserved')""",
+            (status, _now(), production_id, channel_id),
+        )
+
+
+def get_quota_usage(
+    *,
+    database_path: str | Path | None = None,
+    quota_date: str | None = None,
+) -> dict[str, Any]:
+    initialize_youtube_database(database_path)
+    target_date = quota_date or datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
+    with _connection(database_path) as connection:
+        rows = connection.execute(
+            """SELECT channel_id, COUNT(*) AS uploads_attempted,
+                SUM(quota_units) AS quota_units,
+                SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS uploads_succeeded,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS uploads_failed
+            FROM youtube_quota_usage WHERE quota_date = ? GROUP BY channel_id""",
+            (target_date,),
+        ).fetchall()
+    channels = [dict(row) for row in rows]
+    return {
+        "quota_date": target_date,
+        "uploads_attempted": sum(row["uploads_attempted"] for row in channels),
+        "uploads_succeeded": sum(row["uploads_succeeded"] for row in channels),
+        "uploads_failed": sum(row["uploads_failed"] for row in channels),
+        "quota_units_used": sum(row["quota_units"] or 0 for row in channels),
+        "uploads": sum(row["uploads_attempted"] for row in channels),
+        "quota_units": sum(row["quota_units"] or 0 for row in channels),
+        "channels": channels,
+    }
+
+
+def set_upload_retry_after(
+    production_id: str,
+    retry_after: str,
+    database_path: str | Path | None = None,
+) -> None:
+    initialize_youtube_database(database_path)
+    with _connection(database_path) as connection:
+        connection.execute(
+            "UPDATE youtube_uploads SET retry_after = ?, updated_at = ? WHERE production_id = ?",
+            (retry_after, _now(), production_id),
+        )

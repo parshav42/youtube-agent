@@ -7,7 +7,7 @@ from app.config import get_speaking_rate_wps
 from app.agents.scene_agent import plan_scenes
 from app.agents.script_agent import MockScriptGenerator
 from app.agents.story_agent import structure_story
-from app.schemas.script_schema import ScriptRequest
+from app.schemas.script_schema import ScriptRequest, StoryBeatPlan
 
 
 def make_script():
@@ -32,6 +32,36 @@ def test_mock_script_passes_all_heuristic_quality_checks() -> None:
     assert evaluation.structural_labels_absent
     assert evaluation.unsupported_factual_assertions
     assert evaluation.unsupported_guarantees
+
+
+def test_story_structure_canonicalizes_model_beat_labels() -> None:
+    script = MockScriptGenerator().generate(ScriptRequest(topic="discipline"))
+
+    class LabelDriftProvider:
+        def generate_structured(self, response_model, system_prompt, user_prompt, *, max_tokens):
+            assert response_model is StoryBeatPlan
+            return StoryBeatPlan(
+                story_beats=[
+                    "Opening: first",
+                    "Challenge: second",
+                    "Obstacle: third",
+                    "Change: fourth",
+                    "Outcome: fifth",
+                    "Takeaway: sixth",
+                ]
+            )
+
+    structured = structure_story(script, LabelDriftProvider())
+
+    assert [beat.split(":", 1)[0] for beat in structured.story_beats] == [
+        "Hook",
+        "Problem",
+        "Conflict",
+        "Turning point",
+        "Resolution",
+        "Closing message",
+    ]
+    assert structured.story_beats[-1] == "Closing message: sixth"
 
 
 def test_quality_evaluator_rejects_inconsistent_language_and_statistics() -> None:

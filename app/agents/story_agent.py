@@ -4,6 +4,15 @@ from app.schemas.script_schema import MotivationalScript
 from app.schemas.script_schema import StoryBeatPlan
 from app.providers.huggingface_llm import HuggingFaceLLMProvider
 
+STORY_BEAT_LABELS = (
+    "Hook",
+    "Problem",
+    "Conflict",
+    "Turning point",
+    "Resolution",
+    "Closing message",
+)
+
 
 def structure_story(
     script: MotivationalScript, llm_provider: HuggingFaceLLMProvider | None = None
@@ -19,9 +28,11 @@ def structure_story(
             f"Closing message: {script.closing_message}",
             max_tokens=700,
         )
-        return MotivationalScript.model_validate(
-            script.model_copy(update={"story_beats": plan.story_beats})
-        )
+        beats = [
+            f"{label}: {beat.partition(':')[2].strip() or beat.strip()}"
+            for label, beat in zip(STORY_BEAT_LABELS, plan.story_beats, strict=True)
+        ]
+        return MotivationalScript.model_validate(script.model_copy(update={"story_beats": beats}))
     scene_text = [scene.narration for scene in script.scenes]
     midpoint = max(1, len(scene_text) // 2)
     story_beats = [

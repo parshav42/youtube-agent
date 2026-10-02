@@ -19,6 +19,7 @@ from app.agents.story_agent import structure_story
 from app.config import get_quality_threshold, get_speaking_rate_wps
 from app.database.db import save_research, save_script
 from app.providers.huggingface_llm import HuggingFaceConfigurationError, HuggingFaceLLMProvider
+from app.providers.llm_factory import build_llm_provider
 from app.schemas import SelectedTopic, TopicCandidate
 from app.schemas.script_schema import (
     MotivationalScript,
@@ -100,7 +101,7 @@ def build_workflow(
             return active_llm_provider
         if generator is not None and generator.is_mock:
             return None
-        active_llm_provider = HuggingFaceLLMProvider.from_environment()
+        active_llm_provider = build_llm_provider()
         return active_llm_provider
 
     def resolve_script_generator() -> ScriptGenerator:

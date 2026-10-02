@@ -14,7 +14,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
-from app.config import get_database_path
+from app.config import get_auto_publish_settings, get_database_path
 from app.database.db import (
     ScriptNotFoundError,
     ScriptReviewError,
@@ -98,9 +98,10 @@ def create_app(
     async def lifespan(application: FastAPI):
         initialize_youtube_database(resolved_path)
         scheduler = None
-        if os.getenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false").strip().lower() in {
+        scheduler_requested = os.getenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false").strip().lower() in {
             "1", "true", "yes"
-        }:
+        }
+        if scheduler_requested or get_auto_publish_settings()["enabled"]:
             scheduler = build_scheduler(str(resolved_path))
             scheduler.start()
         application.state.scheduler = scheduler

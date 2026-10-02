@@ -4,14 +4,18 @@ import json
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app.config import get_database_path, get_report_output_path
 from app.database.db import _connection
 from app.reporting.email_service import EmailDeliveryError, SMTPEmailService
 from app.youtube.analytics import YouTubeAnalyticsService, YouTubeAnalyticsError
 from app.youtube.repository import (
+    get_quota_usage,
     get_productions_for_report,
+    get_review_queue_counts,
     get_report_history,
+    get_uploads_for_report,
     save_report,
 )
 
@@ -37,6 +41,14 @@ class DailyReportService:
         day_start = datetime.combine(target_date, time.min, timezone.utc).isoformat()
         day_end = datetime.combine(target_date + timedelta(days=1), time.min, timezone.utc).isoformat()
         productions = get_productions_for_report(day_start, day_end, self.database_path)
+        uploads = get_uploads_for_report(day_start, day_end, self.database_path)
+        quota_usage = get_quota_usage(
+            database_path=self.database_path,
+            quota_date=(
+                datetime.fromisoformat(day_end) - timedelta(microseconds=1)
+            ).astimezone(ZoneInfo("America/Los_Angeles")).date().isoformat(),
+        )
+        review_queue = get_review_queue_counts(self.database_path)
         analytics_start = target_date - timedelta(days=28)
         analytics_end = target_date - timedelta(days=1)
         analytics_result: dict[str, Any] = {
@@ -72,6 +84,24 @@ class DailyReportService:
                 failed_operations.append(
                     {"type": "youtube_upload", "production_id": production["id"], "error": production["upload_error"]}
                 )
+            automatic_review = production["metadata"].get("auto_approval")
+            if isinstance(automatic_review, dict) and automatic_review.get("status") == "needs_review":
+                failed_operations.append({
+                    "type": "auto_approval",
+                    "production_id": production["id"],
+                    "error": "; ".join(automatic_review.get("reasons", [])),
+                })
+        for upload in uploads:
+            if upload["status"] == "failed" and not any(
+                item.get("production_id") == upload["production_id"]
+                and item["type"] == "youtube_upload"
+                for item in failed_operations
+            ):
+                failed_operations.append({
+                    "type": "youtube_upload",
+                    "production_id": upload["production_id"],
+                    "error": upload["error"],
+                })
         for video in analytics_result["videos"]:
             if not video.get("retrieved", True):
                 failed_operations.append(
@@ -99,6 +129,17 @@ class DailyReportService:
                 }
                 for row in productions
             ],
+            "uploads_attempted": quota_usage["uploads_attempted"],
+            "uploads_succeeded": sum(
+                1 for upload in uploads if upload["status"] in {"uploaded", "uploaded_private"}
+            ),
+            "public_video_urls": [
+                upload["video_url"]
+                for upload in uploads
+                if upload["status"] == "uploaded" and upload["visibility"] == "public" and upload["video_url"]
+            ],
+            "quota_usage": quota_usage,
+            "items_waiting_for_review": review_queue,
             "analytics": analytics_result,
             "failed_operations": failed_operations,
             "recommended_technical_next_steps": _recommendations(failed_operations, analytics_result),
@@ -175,6 +216,10 @@ def _render_markdown(report: dict[str, Any]) -> str:
         f"Analytics data window: {report['analytics']['start_date']} through {report['analytics']['end_date']}",
         "",
         "## Productions and uploads",
+        f"Uploads attempted: {report['uploads_attempted']}",
+        f"Uploads succeeded: {report['uploads_succeeded']}",
+        f"Quota units used: {report['quota_usage']['quota_units_used']}",
+        f"Items waiting for review: {report['items_waiting_for_review']['total']}",
     ]
     if report["videos_produced"]:
         for video in report["videos_produced"]:
@@ -185,6 +230,10 @@ def _render_markdown(report: dict[str, Any]) -> str:
             )
     else:
         lines.append("- No production records were created in this UTC reporting window.")
+    lines.extend(["", "## Public video URLs"])
+    lines.extend(f"- {url}" for url in report["public_video_urls"])
+    if not report["public_video_urls"]:
+        lines.append("- No public uploads were completed in this reporting window.")
     lines.extend(["", "## Available analytics"])
     channel = report["analytics"]["channel"]
     if channel and channel["metrics_available"]:
