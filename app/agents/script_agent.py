@@ -47,6 +47,7 @@ Language: Natural Hindi-English Hinglish (romanized Hindi mixed with English).
 Duration: exactly {request.target_duration_seconds} seconds.
 
 Requirements:
+- Do not write English-only narration. Naturally mix romanized Hindi throughout, using at least 8 distinct everyday Hindi words across the narration (for example: aaj, aur, bas, hai, har, kal, ki, ko, par, phir, roz, subah, toh, usne, woh, ek). Do not insert these as a list.
 - Tell one cinematic, emotionally grounded story for students and young professionals.
 - Use a concrete character and turning point, not disconnected quotes.
 - Include a compelling opening, one clear message, and a memorable ending.
