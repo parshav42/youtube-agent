@@ -528,8 +528,10 @@ class YouTubePublisher:
         production = get_production_by_id(production_id, self.database_path)
         if production is None:
             raise YouTubePublishError("Production was not found.")
-        if production["status"] != "completed":
-            raise YouTubePublishError("Only completed productions can be published.")
+        if production["status"] not in {"completed", "ready_for_manual_upload"}:
+            raise YouTubePublishError(
+                "Only completed or ready_for_manual_upload productions can be published."
+            )
         metadata = production.get("metadata")
         if not isinstance(metadata, dict) or not has_recorded_decision(
             metadata.get("review_decision"), "approve"
@@ -735,8 +737,11 @@ class YouTubePublisher:
             artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise YouTubePublishError("Completed production metadata is missing or invalid.") from error
-        if artifact.get("production_id") != production["id"] or artifact.get("status") != "completed":
-            raise YouTubePublishError("Production metadata does not match a completed production record.")
+        if artifact.get("production_id") != production["id"] or artifact.get("status") not in {
+            "completed",
+            "ready_for_manual_upload",
+        }:
+            raise YouTubePublishError("Production metadata does not match a finished production record.")
         artifact_metadata = artifact.get("metadata")
         if not isinstance(artifact_metadata, dict):
             raise YouTubePublishError("Completed production has no metadata object.")

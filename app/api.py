@@ -14,7 +14,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
-from app.config import get_auto_publish_settings, get_database_path
+from app.config import (
+    get_auto_publish_settings,
+    get_database_path,
+    get_youtube_auto_match_enabled,
+)
 from app.database.db import (
     ScriptNotFoundError,
     ScriptReviewError,
@@ -28,8 +32,9 @@ from app.reporting.daily_report import DailyReportService
 from app.reporting.scheduler import build_scheduler, run_scheduled_report
 from app.youtube.analytics import YouTubeAnalyticsError, YouTubeAnalyticsService
 from app.youtube.auth import GoogleOAuthService, YouTubeAuthError
+from app.youtube.manual_upload import extract_youtube_video_id
 from app.youtube.publisher import YouTubePublishError, YouTubePublisher
-from app.youtube.repository import initialize_youtube_database
+from app.youtube.repository import get_upload, initialize_youtube_database, link_manual_upload
 from app.video.review_gates import production_qa_allows_approval, video_sha256
 
 _bearer = HTTPBearer(auto_error=False)
@@ -78,6 +83,11 @@ class ProductionReviewDecision(BaseModel):
         return value.strip()
 
 
+class ManualYouTubeLinkRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    url: str = Field(min_length=1, max_length=500)
+
+
 def create_app(
     database_path: str | Path | None = None,
     *,
@@ -101,7 +111,7 @@ def create_app(
         scheduler_requested = os.getenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false").strip().lower() in {
             "1", "true", "yes"
         }
-        if scheduler_requested or get_auto_publish_settings()["enabled"]:
+        if scheduler_requested or get_auto_publish_settings()["enabled"] or get_youtube_auto_match_enabled():
             scheduler = build_scheduler(str(resolved_path))
             scheduler.start()
         application.state.scheduler = scheduler
@@ -163,6 +173,7 @@ def create_app(
         if script is None:
             raise HTTPException(status_code=404, detail="Production script was not found.")
         meta = production["metadata"]
+        upload = get_upload(production_id, resolved_path)
         return {
             "id": production["id"], "status": production["status"],
             "error": production["error"], "script": script["script"],
@@ -170,6 +181,7 @@ def create_app(
             "description": (meta.get("youtube_metadata") or {}).get("description"),
             "audio_qa": meta.get("audio_qa"), "video_qa": meta.get("video_qa"),
             "audio_review_decision": meta.get("audio_review_decision"),
+            "youtube_url": upload.get("video_url") if upload else None,
             "findings": [*(meta.get("audio_qa") or {}).get("findings", []), *(meta.get("video_qa") or {}).get("findings", [])],
             "video_url": f"/api/productions/{production_id}/video",
         }
@@ -194,7 +206,7 @@ def create_app(
         record = get_production_by_id(production_id, resolved_path)
         if record is None:
             raise HTTPException(status_code=404, detail="Production was not found.")
-        if record["status"] not in {"needs_review", "completed"}:
+        if record["status"] not in {"needs_review", "completed", "ready_for_manual_upload"}:
             raise HTTPException(status_code=409, detail="Production is not available for review.")
         if record["metadata"].get("review_decision"):
             raise HTTPException(status_code=409, detail="A review decision has already been recorded.")
@@ -213,10 +225,19 @@ def create_app(
             if output_root not in video_path.parents or not video_path.is_file():
                 raise HTTPException(status_code=409, detail="Final video is unavailable for approval.")
             meta["review_decision"]["video_sha256"] = video_sha256(video_path)
-        status = "completed" if decision == "approve" else "rejected"
+        status = (
+            "ready_for_manual_upload"
+            if decision == "approve" and record["status"] == "ready_for_manual_upload"
+            else "completed" if decision == "approve" else "rejected"
+        )
         if decision == "approve":
             artifact_path = Path(record["output_dir"]).resolve() / "metadata.json"
-            artifact = {"production_id": production_id, "status": status, "metadata": meta, "error": None}
+            artifact = {
+                "production_id": production_id,
+                "status": "completed",
+                "metadata": meta,
+                "error": None,
+            }
             temporary_path = artifact_path.with_name("metadata.review.tmp")
             try:
                 temporary_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -229,6 +250,26 @@ def create_app(
                 raise HTTPException(status_code=500, detail="Production review could not be persisted.") from error
         updated = update_production(production_id, status, meta, database_path=resolved_path)
         return {"production_id": updated["id"], "status": updated["status"], "review_decision": meta["review_decision"]}
+
+    @application.post(
+        "/api/productions/{production_id}/youtube-link",
+        dependencies=[Depends(require_admin)],
+    )
+    def link_production_youtube_video(
+        production_id: str, body: ManualYouTubeLinkRequest
+    ) -> dict[str, Any]:
+        try:
+            video_id = extract_youtube_video_id(body.url)
+            upload = link_manual_upload(production_id, video_id, resolved_path)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return {
+            "production_id": production_id,
+            "status": "published",
+            "video_id": upload["video_id"],
+            "video_url": upload["video_url"],
+            "upload_status": upload["status"],
+        }
 
     @application.post(
         "/api/productions/{production_id}/audio-review/{decision}",
@@ -386,6 +427,11 @@ def create_app(
         "/api/publishing/{production_id}/upload", dependencies=[Depends(require_admin)]
     )
     def publishing_upload(production_id: str) -> dict[str, Any]:
+        if not get_auto_publish_settings()["enabled"]:
+            raise HTTPException(
+                status_code=403,
+                detail="YouTube API uploads are disabled. Set AUTO_PUBLISH_ENABLED=true to re-enable them.",
+            )
         try:
             return _upload_response(resolved_publisher.upload(production_id))
         except YouTubePublishError as error:

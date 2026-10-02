@@ -7,12 +7,17 @@ from typing import Any
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app.config import get_auto_publish_settings, get_database_path
+from app.config import (
+    get_auto_publish_settings,
+    get_database_path,
+    get_youtube_auto_match_enabled,
+)
 from app.reporting.daily_report import DailyReportService
 from app.youtube.repository import claim_job, finish_job
 
 JOB_NAME = "daily-youtube-analytics-report"
 AUTO_PUBLISH_JOB_NAME = "youtube-auto-publish"
+AUTO_MATCH_JOB_NAME = "youtube-upload-auto-match"
 
 
 def run_scheduled_report(
@@ -71,6 +76,20 @@ def build_scheduler(database_path: str | None = None) -> BackgroundScheduler:
             coalesce=True,
             misfire_grace_time=3600,
         )
+    if get_youtube_auto_match_enabled():
+        match_trigger = CronTrigger.from_crontab(
+            os.getenv("YOUTUBE_AUTO_MATCH_CRON", "*/15 * * * *"), timezone="UTC"
+        )
+        scheduler.add_job(
+            run_scheduled_auto_match,
+            trigger=match_trigger,
+            id=AUTO_MATCH_JOB_NAME,
+            kwargs={"database_path": database_path or str(get_database_path())},
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
     return scheduler
 
 
@@ -98,6 +117,32 @@ def run_scheduled_auto_publish(
         finish_job(AUTO_PUBLISH_JOB_NAME, run_key, status="failed", error=safe_error, database_path=path)
         return {"status": "failed", "run_date": run_key, "error": safe_error}
     finish_job(AUTO_PUBLISH_JOB_NAME, run_key, status="completed", database_path=path)
+    return {"status": "completed", "run_date": run_key, "result": result}
+
+
+def run_scheduled_auto_match(
+    *,
+    database_path: str | None = None,
+    auto_matcher: Any | None = None,
+) -> dict[str, Any]:
+    """Run one durable optional poll of the YouTube uploads playlist."""
+    if not get_youtube_auto_match_enabled():
+        return {"status": "disabled", "matched": []}
+    path = database_path or str(get_database_path())
+    run_key = datetime.now(timezone.utc).replace(second=0, microsecond=0).isoformat()
+    if not claim_job(AUTO_MATCH_JOB_NAME, run_key, path, max_attempts=3):
+        return {"status": "already_claimed_or_completed", "run_date": run_key}
+    try:
+        if auto_matcher is None:
+            from app.youtube.auto_match import YouTubeAutoMatcher
+
+            auto_matcher = YouTubeAutoMatcher(path)
+        result = auto_matcher.run()
+    except Exception as error:
+        safe_error = f"{type(error).__name__}: YouTube auto-match operation did not complete."
+        finish_job(AUTO_MATCH_JOB_NAME, run_key, status="failed", error=safe_error, database_path=path)
+        return {"status": "failed", "run_date": run_key, "error": safe_error}
+    finish_job(AUTO_MATCH_JOB_NAME, run_key, status="completed", database_path=path)
     return {"status": "completed", "run_date": run_key, "result": result}
 
 

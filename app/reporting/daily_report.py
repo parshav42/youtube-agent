@@ -131,12 +131,14 @@ class DailyReportService:
             ],
             "uploads_attempted": quota_usage["uploads_attempted"],
             "uploads_succeeded": sum(
-                1 for upload in uploads if upload["status"] in {"uploaded", "uploaded_private"}
+                1 for upload in uploads if upload["status"] in {"uploaded", "uploaded_private", "manual"}
             ),
             "public_video_urls": [
                 upload["video_url"]
                 for upload in uploads
-                if upload["status"] == "uploaded" and upload["visibility"] == "public" and upload["video_url"]
+                if upload["status"] in {"uploaded", "manual"}
+                and upload["visibility"] == "public"
+                and upload["video_url"]
             ],
             "quota_usage": quota_usage,
             "items_waiting_for_review": review_queue,

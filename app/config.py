@@ -152,6 +152,11 @@ def get_auto_publish_settings() -> dict[str, object]:
     }
 
 
+def get_youtube_auto_match_enabled() -> bool:
+    """Return whether the read-only uploads-playlist matcher is enabled."""
+    return _get_bool("YOUTUBE_AUTO_MATCH_ENABLED", False)
+
+
 def _get_bool(name: str, default: bool) -> bool:
     value = os.getenv(name, str(default)).strip().lower()
     if value not in {"true", "false", "1", "0", "yes", "no"}:

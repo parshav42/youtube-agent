@@ -82,7 +82,7 @@ def initialize_youtube_database(database_path: str | Path | None = None) -> None
                 video_url TEXT,
                 status TEXT NOT NULL CHECK (status IN (
                     'awaiting_review', 'approved', 'uploading',
-                    'uploaded_private', 'uploaded', 'failed', 'cancelled'
+                    'uploaded_private', 'uploaded', 'manual', 'failed', 'cancelled'
                 )),
                 visibility TEXT NOT NULL CHECK (visibility IN ('private', 'unlisted', 'public')),
                 resumable_uri TEXT,
@@ -106,6 +106,46 @@ def initialize_youtube_database(database_path: str | Path | None = None) -> None
         ):
             if column not in upload_columns:
                 connection.execute(f"ALTER TABLE youtube_uploads ADD COLUMN {column} {declaration}")
+        table_sql = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'youtube_uploads'"
+        ).fetchone()[0]
+        if "'manual'" not in table_sql:
+            connection.execute(
+                """CREATE TABLE youtube_uploads_manual_migration (
+                    production_id TEXT PRIMARY KEY REFERENCES productions(id),
+                    channel_id TEXT,
+                    video_id TEXT UNIQUE,
+                    video_url TEXT,
+                    status TEXT NOT NULL CHECK (status IN (
+                        'awaiting_review', 'approved', 'uploading',
+                        'uploaded_private', 'uploaded', 'manual', 'failed', 'cancelled'
+                    )),
+                    visibility TEXT NOT NULL CHECK (visibility IN ('private', 'unlisted', 'public')),
+                    resumable_uri TEXT,
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
+                    lease_until TEXT,
+                    api_response_json TEXT,
+                    error TEXT,
+                    retry_after TEXT,
+                    uploaded_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )"""
+            )
+            connection.execute(
+                """INSERT INTO youtube_uploads_manual_migration
+                (production_id, channel_id, video_id, video_url, status, visibility,
+                    resumable_uri, attempt_count, lease_until, api_response_json, error,
+                    retry_after, uploaded_at, created_at, updated_at)
+                SELECT production_id, channel_id, video_id, video_url, status, visibility,
+                    resumable_uri, attempt_count, lease_until, api_response_json, error,
+                    retry_after, uploaded_at, created_at, updated_at
+                FROM youtube_uploads"""
+            )
+            connection.execute("DROP TABLE youtube_uploads")
+            connection.execute(
+                "ALTER TABLE youtube_uploads_manual_migration RENAME TO youtube_uploads"
+            )
         connection.execute(
             """UPDATE youtube_uploads SET channel_id = (
                 SELECT approved_channel_id FROM publishing_approvals
@@ -280,8 +320,8 @@ def approve_production(
         ).fetchone()
         if production is None:
             raise ValueError(f"Production {production_id} was not found.")
-        if production["status"] != "completed":
-            raise ValueError("Only completed video productions can be approved for publishing.")
+        if production["status"] not in {"completed", "ready_for_manual_upload"}:
+            raise ValueError("Only finished video productions can be approved for publishing.")
         existing = connection.execute(
             "SELECT state FROM publishing_approvals WHERE production_id = ?", (production_id,)
         ).fetchone()
@@ -393,6 +433,75 @@ def get_upload(
     return record
 
 
+def link_manual_upload(
+    production_id: str,
+    video_id: str,
+    database_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Record a manually uploaded public video and publish its production."""
+    initialize_youtube_database(database_path)
+    now = _now()
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+    with _connection(database_path) as connection:
+        production = connection.execute(
+            "SELECT status, metadata_json FROM productions WHERE id = ?", (production_id,)
+        ).fetchone()
+        if production is None:
+            raise ValueError(f"Production {production_id} was not found.")
+        if production["status"] not in {"ready_for_manual_upload", "published", "completed"}:
+            raise ValueError("Production is not ready to link to a YouTube video.")
+        existing = connection.execute(
+            "SELECT video_id, status FROM youtube_uploads WHERE production_id = ?",
+            (production_id,),
+        ).fetchone()
+        if existing and (existing["status"] != "manual" or existing["video_id"] != video_id):
+            raise ValueError("A different publishing record already exists for this production.")
+        conflict = connection.execute(
+            "SELECT production_id FROM youtube_uploads WHERE video_id = ? AND production_id != ?",
+            (video_id, production_id),
+        ).fetchone()
+        if conflict:
+            raise ValueError("This YouTube video is already linked to another production.")
+        connection.execute(
+            """INSERT INTO youtube_uploads
+            (production_id, video_id, video_url, status, visibility, uploaded_at, created_at, updated_at)
+            VALUES (?, ?, ?, 'manual', 'public', ?, ?, ?)
+            ON CONFLICT(production_id) DO UPDATE SET video_url = excluded.video_url,
+                uploaded_at = COALESCE(youtube_uploads.uploaded_at, excluded.uploaded_at),
+                updated_at = excluded.updated_at""",
+            (production_id, video_id, video_url, now, now, now),
+        )
+        metadata = json.loads(production["metadata_json"])
+        metadata["manual_upload"] = {"video_id": video_id, "video_url": video_url, "linked_at": now}
+        connection.execute(
+            "UPDATE productions SET status = 'published', metadata_json = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(metadata, ensure_ascii=False), now, production_id),
+        )
+    record = get_upload(production_id, database_path)
+    if record is None:
+        raise RuntimeError("The manual YouTube link could not be read after saving.")
+    return record
+
+
+def get_ready_manual_uploads(
+    database_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Return ready productions that do not already have a linked video."""
+    initialize_youtube_database(database_path)
+    with _connection(database_path) as connection:
+        rows = connection.execute(
+            """SELECT p.id, p.metadata_json FROM productions AS p
+            WHERE p.status = 'ready_for_manual_upload'
+                AND NOT EXISTS (
+                    SELECT 1 FROM youtube_uploads AS u WHERE u.production_id = p.id
+                )"""
+        ).fetchall()
+    return [
+        {"production_id": row["id"], "metadata": json.loads(row["metadata_json"])}
+        for row in rows
+    ]
+
+
 def cancel_publishing(
     production_id: str,
     database_path: str | Path | None = None,
@@ -439,8 +548,8 @@ def request_review(
         ).fetchone()
         if production is None:
             raise ValueError(f"Production {production_id} was not found.")
-        if production["status"] != "completed":
-            raise ValueError("Only completed video productions can enter publishing review.")
+        if production["status"] not in {"completed", "ready_for_manual_upload"}:
+            raise ValueError("Only finished video productions can enter publishing review.")
         existing = connection.execute(
             "SELECT state FROM publishing_approvals WHERE production_id = ?", (production_id,)
         ).fetchone()
@@ -847,7 +956,7 @@ def get_auto_approval_candidates(
             """SELECT p.id AS production_id, p.script_id
             FROM productions AS p
             LEFT JOIN publishing_approvals AS a ON a.production_id = p.id
-            WHERE p.status = 'completed'
+            WHERE p.status IN ('completed', 'ready_for_manual_upload')
                 AND json_extract(p.metadata_json, '$.auto_approval.status') = 'approved'
                 AND (a.production_id IS NULL OR a.state = 'awaiting_review')
             ORDER BY p.created_at, p.id LIMIT ?""",

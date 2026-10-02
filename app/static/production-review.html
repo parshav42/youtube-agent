@@ -14,7 +14,7 @@
       <div>
         <p class="eyebrow">Local review workspace</p>
         <h1>Final video review</h1>
-        <p>Audio review and production approval are separate decisions. Nothing here uploads or publishes.</p>
+        <p>Audio review and production approval are separate decisions. Upload the finished video manually on YouTube.</p>
       </div>
       <div class="production-header-actions">
         <button id="refresh-review" class="button button-quiet" type="button" disabled>Refresh review</button>
@@ -49,6 +49,16 @@
           <section class="production-section"><h3>Video QA</h3><pre id="videoqa"></pre></section>
           <section class="production-section"><h3>Validation findings</h3><pre id="findings"></pre></section>
         </div>
+      </section>
+
+      <section id="manual-upload-link" class="production-section" aria-labelledby="manual-upload-heading" hidden>
+        <h2 id="manual-upload-heading">Uploaded manually? Paste the YouTube URL:</h2>
+        <form id="manual-upload-form" class="production-actions">
+          <label class="visually-hidden" for="youtube-url">YouTube video URL</label>
+          <input id="youtube-url" type="url" required maxlength="500" placeholder="https://www.youtube.com/watch?v=..." autocomplete="url">
+          <button id="save-youtube-url" class="button button-primary" type="submit">Save</button>
+        </form>
+        <p id="manual-upload-status" role="status"></p>
       </section>
 
       <section id="audio-review" class="production-section production-audio-review" aria-labelledby="audio-review-heading">

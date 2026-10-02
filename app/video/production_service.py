@@ -204,7 +204,11 @@ class ProductionService:
                     + ")."
                 )
             self._update(production_id, "rendering", metadata)
-            status = "needs_review" if audio_qa.technical_status == "needs_review" else "completed"
+            status = (
+                "needs_review"
+                if audio_qa.technical_status == "needs_review"
+                else "ready_for_manual_upload"
+            )
             self._write_metadata(output_dir, production_id, status, metadata, None)
             return self._update(production_id, status, metadata)
         except Exception as error:

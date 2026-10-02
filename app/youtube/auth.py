@@ -14,7 +14,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 
-from app.config import get_youtube_callback_uri
+from app.config import get_auto_publish_settings, get_youtube_callback_uri
 from app.youtube.repository import (
     consume_oauth_state,
     create_oauth_state,
@@ -29,6 +29,15 @@ SCOPES = (
     "https://www.googleapis.com/auth/youtube.readonly",
     "https://www.googleapis.com/auth/yt-analytics.readonly",
 )
+READ_ONLY_SCOPES = (
+    "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/yt-analytics.readonly",
+)
+
+
+def requested_scopes() -> tuple[str, ...]:
+    """Request read-only scopes unless the preserved API upload path is enabled."""
+    return SCOPES if get_auto_publish_settings()["enabled"] else READ_ONLY_SCOPES
 
 
 class YouTubeAuthError(RuntimeError):
@@ -63,7 +72,7 @@ class GoogleOAuthService:
             "missing_configuration": missing,
             "updated_at": saved["updated_at"] if saved else None,
             "error": saved["error"] if saved else None,
-            "scopes": list(SCOPES),
+            "scopes": list(requested_scopes()),
         }
 
     def _fernet(self) -> Fernet:
@@ -113,7 +122,7 @@ class GoogleOAuthService:
         verifier = secrets.token_urlsafe(64)
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
         challenge = challenge.rstrip(b"=").decode("ascii")
-        flow = Flow.from_client_config(client_config, scopes=SCOPES, state=state)
+        flow = Flow.from_client_config(client_config, scopes=requested_scopes(), state=state)
         flow.redirect_uri = client_config["web"]["redirect_uris"][0]
         authorization_url, returned_state = flow.authorization_url(
             access_type="offline",
@@ -153,7 +162,7 @@ class GoogleOAuthService:
         except (InvalidToken, UnicodeDecodeError) as error:
             raise YouTubeAuthError("The pending OAuth authorization expired; start again.") from error
         client_config = self._client_config()
-        flow = Flow.from_client_config(client_config, scopes=SCOPES, state=state)
+        flow = Flow.from_client_config(client_config, scopes=requested_scopes(), state=state)
         flow.redirect_uri = client_config["web"]["redirect_uris"][0]
         try:
             flow.fetch_token(code=code, code_verifier=verifier)
@@ -173,7 +182,7 @@ class GoogleOAuthService:
         try:
             decrypted = self._fernet().decrypt(row["encrypted_token"].encode()).decode("utf-8")
             token_data = json.loads(decrypted)
-            credentials = Credentials.from_authorized_user_info(token_data, scopes=SCOPES)
+            credentials = Credentials.from_authorized_user_info(token_data, scopes=requested_scopes())
         except (InvalidToken, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
             set_credential_status(
                 "reauth_required", "Stored Google credentials cannot be decrypted.", self.database_path

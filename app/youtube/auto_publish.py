@@ -418,8 +418,8 @@ class AutoPublishService:
         existing_decision = metadata.get("review_decision")
         if isinstance(existing_decision, dict) and existing_decision.get("reviewer") != "auto-publish-policy":
             raise RuntimeError("Production already has a human review decision.")
-        if production["status"] != "completed":
-            reasons = [f"production status is {production['status']!r}, not completed"]
+        if production["status"] not in {"completed", "ready_for_manual_upload"}:
+            reasons = [f"production status is {production['status']!r}, not ready for upload"]
             return self._mark_needs_review(production, metadata, reasons)
 
         video_metadata = metadata.get("video")
@@ -476,7 +476,10 @@ class AutoPublishService:
                 ["completed production metadata artifact is missing or invalid"],
             )
         update_production(
-            production_id, "completed", metadata, database_path=self.database_path
+            production_id,
+            "ready_for_manual_upload",
+            metadata,
+            database_path=self.database_path,
         )
         approval = self.publisher.approve_automatically(production_id)
         if approval["visibility"] != "public":

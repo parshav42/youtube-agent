@@ -128,6 +128,12 @@
     byId("script").textContent = data.script?.narration || "Script unavailable";
     byId("description").textContent = data.description || "Description unavailable";
     byId("status").textContent = data.status || "Status unavailable";
+    const manualUploadSection = byId("manual-upload-link");
+    manualUploadSection.hidden = !["ready_for_manual_upload", "published"].includes(data.status);
+    byId("youtube-url").value = data.youtube_url || "";
+    byId("manual-upload-status").textContent = data.status === "published"
+      ? "YouTube video linked."
+      : "";
     byId("audio-status").textContent = audioStatus;
     byId("audio").textContent = JSON.stringify(audioQa, null, 2);
     byId("videoqa").textContent = JSON.stringify(data.video_qa || { technical_status: "not run" }, null, 2);
@@ -212,4 +218,22 @@
   byId("audio-reject").addEventListener("click", () => recordDecision("audio-review", "reject"));
   byId("approve").addEventListener("click", () => recordDecision("review", "approve"));
   byId("reject").addEventListener("click", () => recordDecision("review", "reject"));
+  byId("manual-upload-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const saveButton = byId("save-youtube-url");
+    saveButton.disabled = true;
+    try {
+      const result = await request(`/api/productions/${encodeURIComponent(productionId)}/youtube-link`, {
+        method: "POST",
+        body: JSON.stringify({ url: byId("youtube-url").value.trim() })
+      });
+      byId("manual-upload-status").textContent = `Linked ${result.video_url}`;
+      await loadReview();
+    } catch (cause) {
+      if (cause.authFailure) showAuth(cause.message);
+      else showError(cause instanceof Error ? cause.message : "YouTube URL could not be saved.");
+    } finally {
+      saveButton.disabled = false;
+    }
+  });
 })();

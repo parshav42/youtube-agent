@@ -30,6 +30,7 @@ from app.video.image_generator import (
     build_image_provider,
     generate_scene_images,
 )
+from app.youtube.manual_upload import export_upload_package
 
 
 def main() -> int:
@@ -54,6 +55,11 @@ def main() -> int:
     )
     modes.add_argument(
         "--resume-production", metavar="PRODUCTION_ID", help="Resume a failed production whose source script remains approved."
+    )
+    modes.add_argument(
+        "--export-upload-package",
+        metavar="PRODUCTION_ID",
+        help="Export a finished production and its YouTube metadata for manual upload.",
     )
     modes.add_argument(
         "--approve-script", type=int, metavar="SCRIPT_ID", help="Record explicit human approval of a passing script."
@@ -84,6 +90,14 @@ def main() -> int:
         return produce_script(args.produce_script, database_path, debug=args.debug)
     if args.resume_production:
         return resume_production(args.resume_production, database_path, debug=args.debug)
+    if args.export_upload_package:
+        try:
+            package_path = export_upload_package(args.export_upload_package, database_path)
+        except (OSError, ValueError) as error:
+            print(f"Unable to export upload package: {error}", file=sys.stderr)
+            return 1
+        print(f"Upload package: {package_path}")
+        return 0
     if args.approve_script is not None:
         if not args.reviewer or not args.reviewer.strip():
             print("--reviewer is required with --approve-script.", file=sys.stderr)
@@ -318,7 +332,7 @@ def print_production(record: dict[str, Any]) -> int:
     print(f"Script ID: {record['script_id']}")
     print(f"Status: {record['status']}")
     print(f"Output directory: {record['output_dir']}")
-    if record["status"] == "completed":
+    if record["status"] in {"completed", "ready_for_manual_upload"}:
         print(f"Output MP4: {record['metadata']['video']['path']}")
         print("Validated media:")
         print(json.dumps(record["metadata"]["video"], ensure_ascii=False, indent=2))
