@@ -14,7 +14,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 
-from app.config import get_auto_publish_settings, get_youtube_callback_uri
+from app.config import get_auto_publish_enabled, get_youtube_callback_uri
 from app.youtube.repository import (
     consume_oauth_state,
     create_oauth_state,
@@ -37,7 +37,7 @@ READ_ONLY_SCOPES = (
 
 def requested_scopes() -> tuple[str, ...]:
     """Request read-only scopes unless the preserved API upload path is enabled."""
-    return SCOPES if get_auto_publish_settings()["enabled"] else READ_ONLY_SCOPES
+    return SCOPES if get_auto_publish_enabled() else READ_ONLY_SCOPES
 
 
 class YouTubeAuthError(RuntimeError):

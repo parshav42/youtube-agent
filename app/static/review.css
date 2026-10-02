@@ -147,6 +147,7 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .production-header h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 36px; font-weight: 500; line-height: 1.1; }
 .production-header p:last-child { max-width: 600px; margin: 10px 0 0; color: var(--muted); }
 .production-header-actions, .production-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.production-actions input[type="url"] { flex: 1 1 320px; min-width: 0; }
 .production-auth { display: grid; max-width: 480px; gap: 9px; padding: 22px; border: 1px solid var(--line); border-top: 4px solid var(--yellow); border-radius: 8px; background: var(--panel); }
 .production-auth label, .production-page > #content > section > label { margin-top: 6px; font-size: 13px; font-weight: 700; }
 .production-page input { min-height: 42px; padding: 0 11px; border: 1px solid #cbd4cb; border-radius: 5px; outline-color: var(--green); background: white; color: var(--ink); }
