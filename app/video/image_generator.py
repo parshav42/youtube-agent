@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import time
@@ -238,7 +239,7 @@ class PixabayImageProvider:
                 PIXABAY_ENDPOINT,
                 params={
                     "key": self.api_key,
-                    "q": prompt,
+                    "q": _sanitize_pixabay_query(prompt),
                     "orientation": "vertical",
                     "image_type": "photo",
                     "per_page": 3,
@@ -434,6 +435,14 @@ def _existing_scene_images(library: Path, scene_number: int) -> list[Path]:
         path for path in library.glob(f"scene_{scene_number:02d}.*")
         if path.suffix.lower() in SUPPORTED_EXTENSIONS and path.is_file()
     )
+
+
+def _sanitize_pixabay_query(prompt: str) -> str:
+    """Reduce free-form scene direction to Pixabay's safe, bounded search terms."""
+    ascii_prompt = prompt.encode("ascii", errors="ignore").decode("ascii")
+    terms = re.sub(r"[^A-Za-z0-9 ]+", " ", ascii_prompt).split()
+    query = " ".join(terms[:12])[:100].strip()
+    return query or "motivation nature landscape"
 
 
 def _update_manifest(
