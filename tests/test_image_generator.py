@@ -141,6 +141,18 @@ def test_pollinations_non_retryable_4xx_exposes_status_without_secret():
     assert len(session.calls) == 1
 
 
+def test_pollinations_402_explains_access_blocker():
+    provider = PollinationsImageProvider(
+        session=FakeSession([FakeResponse(402)]),
+        sleep=lambda delay: None,
+    )
+
+    with pytest.raises(ImageGenerationError, match="current free-tier availability") as error:
+        provider.generate("A student studying", __import__("pathlib").Path("unused.jpg"))
+
+    assert error.value.status_code == 402
+
+
 def test_pollinations_writes_image_and_removes_invalid_output(tmp_path):
     valid_session = FakeSession([FakeResponse(200, _image_bytes())])
     PollinationsImageProvider(session=valid_session, sleep=lambda delay: None).generate(

@@ -115,10 +115,19 @@ class PollinationsImageProvider:
             status = int(response.status_code)
             if status == 429 or status >= 500:
                 if attempt + 1 < self.max_attempts:
+                    close = getattr(response, "close", None)
+                    if callable(close):
+                        close()
                     self._sleep(15 * (2**attempt))
                     continue
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
                 raise self._http_error(status)
             if status >= 400:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
                 raise self._http_error(status)
 
             target: Path | None = None
@@ -161,6 +170,11 @@ class PollinationsImageProvider:
     def _http_error(status: int) -> ImageGenerationError:
         if status in {401, 403}:
             message = "Pollinations rejected the request. Check POLLINATIONS_API_KEY."
+        elif status == 402:
+            message = (
+                "Pollinations returned HTTP 402 (access/payment required). Check POLLINATIONS_API_KEY "
+                "and current free-tier availability."
+            )
         elif status == 429:
             message = (
                 "Pollinations rate limit reached. Free tier allows roughly one request every 15 seconds; "
