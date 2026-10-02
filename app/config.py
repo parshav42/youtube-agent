@@ -80,8 +80,8 @@ def get_licensed_asset_path() -> Path:
 def get_image_provider_name() -> str:
     """Return the selected image provider, defaulting to manual local assets."""
     provider = os.getenv("IMAGE_PROVIDER", "manual").strip().lower()
-    if provider not in {"manual", "pollinations"}:
-        raise ValueError("IMAGE_PROVIDER must be 'pollinations' or 'manual'.")
+    if provider not in {"manual", "pollinations", "pixabay"}:
+        raise ValueError("IMAGE_PROVIDER must be 'manual', 'pollinations', or 'pixabay'.")
     return provider
 
 
@@ -96,6 +96,12 @@ def get_pollinations_model() -> str:
 def get_pollinations_api_key() -> str | None:
     """Return an optional Pollinations API key without exposing it."""
     key = os.getenv("POLLINATIONS_API_KEY", "").strip()
+    return key or None
+
+
+def get_pixabay_api_key() -> str | None:
+    """Return the optional Pixabay API key without exposing it."""
+    key = os.getenv("PIXABAY_API_KEY", "").strip()
     return key or None
 
 

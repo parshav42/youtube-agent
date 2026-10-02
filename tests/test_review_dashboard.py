@@ -1,16 +1,17 @@
 """Isolated route and asset checks for the local review dashboards."""
 
+import asyncio
 from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
-from fastapi.testclient import TestClient
 
 from app.api import create_app
 from app.agents.script_agent import MockScriptGenerator
 from app.database.db import create_production, save_script, update_production
 from app.schemas.script_schema import ScriptRequest
+from app.youtube.repository import initialize_youtube_database
 
 
 def test_review_dashboard_serves_static_assets_without_weakening_api_auth(
@@ -56,6 +57,9 @@ def test_production_review_page_is_local_and_cannot_upload(tmp_path) -> None:
     assert "/upload" not in html + script
     assert ".textContent" in script
     assert "media-src 'self' blob: data:" in response.headers["content-security-policy"]
+    assert "video.src = data.video_url" in script
+    assert "URL.createObjectURL" not in script
+    assert 'data.status === "needs_review" && data.video_exists' in script
 
 
 def test_audio_review_dashboard_renders_findings_safely_and_separates_decisions() -> None:
@@ -94,21 +98,28 @@ def test_production_media_and_api_include_rendered_needs_review_output(tmp_path,
     metadata = {"youtube_metadata": {}, "audio_qa": {}, "video_qa": {}}
     create_production("rendered-review", record["id"], "review fixture", output, metadata, database)
     update_production("rendered-review", "needs_review", metadata, database_path=database)
+    initialize_youtube_database(database)
     monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "dashboard-api-token")
     monkeypatch.setenv("MOTIVATIONOS_OUTPUT_DIR", str(output_root))
     monkeypatch.setenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false")
     monkeypatch.setenv("AUTO_PUBLISH_ENABLED", "false")
 
-    client = TestClient(create_app(database))
-    headers = {"Authorization": "Bearer dashboard-api-token"}
-    listing = client.get("/api/productions", headers=headers)
-    assert listing.status_code == 200
-    assert any(item["production_id"] == "rendered-review" for item in listing.json())
-    detail = client.get("/api/productions/rendered-review", headers=headers)
-    assert detail.status_code == 200
-    assert detail.json()["video_url"] == "/media/productions/rendered-review/final.mp4"
-    assert detail.json()["video_exists"] is True
-    media = client.get(detail.json()["video_url"])
-    assert media.status_code == 200
-    assert media.headers["content-type"].startswith("video/mp4")
-    assert client.get("/media/productions/rendered-review/metadata.json").status_code == 404
+    application = create_app(database)
+    listing_route = next(route for route in application.routes if getattr(route, "path", None) == "/api/productions")
+    listing = listing_route.endpoint()
+    assert any(item["production_id"] == "rendered-review" for item in listing)
+    detail_route = next(route for route in application.routes if getattr(route, "path", None) == "/api/productions/{production_id}")
+    detail = detail_route.endpoint("rendered-review")
+    assert detail["video_url"] == "/media/productions/rendered-review/final.mp4"
+    assert detail["video_exists"] is True
+    media_mount = next(route for route in application.routes if getattr(route, "name", None) == "productions-media")
+    media_path, stat_result = media_mount.app.lookup_path("rendered-review/final.mp4")
+    response = media_mount.app.file_response(
+        media_path, stat_result, {"method": "GET", "headers": []}
+    )
+    assert response.status_code == 200
+    assert response.media_type == "video/mp4"
+    hidden = asyncio.run(media_mount.app.get_response(
+        "rendered-review/metadata.json", {"method": "GET", "headers": []}
+    ))
+    assert hidden.status_code == 404

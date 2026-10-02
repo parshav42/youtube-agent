@@ -18,6 +18,7 @@ from PIL import Image, UnidentifiedImageError
 from app.config import (
     get_image_provider_name,
     get_licensed_asset_path,
+    get_pixabay_api_key,
     get_pollinations_api_key,
     get_pollinations_height,
     get_pollinations_model,
@@ -30,6 +31,7 @@ SUPPORTED_FORMATS = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 MIN_IMAGE_BYTES = 20 * 1024
 POLLINATIONS_ENDPOINT = "https://image.pollinations.ai/prompt/"
+PIXABAY_ENDPOINT = "https://pixabay.com/api/"
 
 
 class ImageGenerationError(RuntimeError):
@@ -195,8 +197,151 @@ class ManualImageProvider:
         if not Path(output_path).is_file():
             raise ImageGenerationError(
                 f"Manual image provider expects an existing licensed image at {output_path}. "
-                "Set IMAGE_PROVIDER=pollinations to generate one automatically."
+                "Set IMAGE_PROVIDER=pollinations or pixabay to generate one automatically."
             )
+
+
+class PixabayImageProvider:
+    """Download vertical photos from the Pixabay image search API."""
+
+    provider_name = "Pixabay"
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        timeout_seconds: int = 30,
+        session: Any | None = None,
+    ) -> None:
+        try:
+            import requests
+        except ImportError as error:
+            raise ImageGenerationError(
+                "IMAGE_PROVIDER=pixabay requested but the requests library is missing from requirements.txt."
+            ) from error
+        self.api_key = api_key if api_key is not None else get_pixabay_api_key()
+        self.timeout_seconds = timeout_seconds
+        self._requests = requests
+        self._session = session or requests
+        self.provenance: dict[str, Any] | None = None
+
+    def generate(self, prompt: str, output_path: Path) -> None:
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ImageGenerationError("Scene visual_description must not be empty.")
+        if not self.api_key:
+            raise ImageGenerationError(
+                "Pixabay requires an API key. Set PIXABAY_API_KEY in .env."
+            )
+        self.provenance = None
+        try:
+            response = self._session.get(
+                PIXABAY_ENDPOINT,
+                params={
+                    "key": self.api_key,
+                    "q": prompt,
+                    "orientation": "vertical",
+                    "image_type": "photo",
+                    "per_page": 3,
+                },
+                timeout=self.timeout_seconds,
+            )
+        except self._requests.exceptions.RequestException as error:
+            raise ImageGenerationError("Pixabay search failed due to a network error.") from error
+
+        try:
+            self._raise_for_status(response.status_code, search=True)
+            try:
+                results = response.json()
+            except (ValueError, AttributeError) as error:
+                raise ImageGenerationError("Pixabay returned an invalid search response.") from error
+        finally:
+            _close_response(response)
+
+        hits = results.get("hits") if isinstance(results, dict) else None
+        if not isinstance(hits, list) or not hits:
+            raise ImageGenerationError(
+                "Pixabay found no images for this scene description. Try a more specific visual description."
+            )
+        hit = hits[0]
+        if not isinstance(hit, dict):
+            raise ImageGenerationError("Pixabay returned incomplete image metadata.")
+        image_url = hit.get("largeImageURL")
+        page_url = hit.get("pageURL")
+        user = hit.get("user")
+        pixabay_id = hit.get("id")
+        if (
+            not isinstance(image_url, str)
+            or not image_url.startswith("https://")
+            or not isinstance(page_url, str)
+            or not page_url.strip()
+            or not isinstance(user, str)
+            or not user.strip()
+            or type(pixabay_id) is not int
+        ):
+            raise ImageGenerationError("Pixabay returned incomplete image provenance metadata.")
+
+        try:
+            image_response = self._session.get(image_url, timeout=self.timeout_seconds)
+        except self._requests.exceptions.RequestException as error:
+            raise ImageGenerationError("Pixabay image download failed due to a network error.") from error
+
+        target: Path | None = None
+        try:
+            self._raise_for_status(image_response.status_code, search=False)
+            content = image_response.content
+            with Image.open(BytesIO(content)) as image:
+                image_format = image.format
+                width, height = image.size
+                image.verify()
+            extension = SUPPORTED_FORMATS.get(image_format or "")
+            if extension is None:
+                raise ImageGenerationError("Pixabay returned an unsupported image format.")
+            if height <= width:
+                raise ImageGenerationError(
+                    "Pixabay returned a landscape image despite the vertical orientation request."
+                )
+            target = Path(output_path).with_suffix(extension)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+            if target.stat().st_size < MIN_IMAGE_BYTES:
+                raise ImageGenerationError(
+                    f"Downloaded image is smaller than the {MIN_IMAGE_BYTES}-byte minimum."
+                )
+            with Image.open(target) as image:
+                image.verify()
+            self.provenance = {
+                "source": "Pixabay",
+                "url": page_url,
+                "user": user,
+                "license": "Pixabay Content License",
+                "rights_holder": user,
+                "pixabay_id": pixabay_id,
+            }
+        except ImageGenerationError:
+            _remove_if_present(target)
+            raise
+        except (OSError, UnidentifiedImageError, ValueError) as error:
+            _remove_if_present(target)
+            raise ImageGenerationError(
+                "Pixabay response was not a valid supported portrait image."
+            ) from error
+        finally:
+            _close_response(image_response)
+
+    @staticmethod
+    def _raise_for_status(status_code: int, *, search: bool) -> None:
+        status = int(status_code)
+        if status < 400:
+            return
+        if search and status in {401, 403}:
+            message = "Pixabay rejected the API key. Verify PIXABAY_API_KEY in .env."
+        elif status == 429:
+            message = "Pixabay API rate limit reached. Check current account limits and retry later."
+        elif status >= 500:
+            message = f"Pixabay service temporarily failed with HTTP {status}. Retry later."
+        else:
+            message = f"Pixabay image request failed with HTTP {status}."
+        raise ImageGenerationError(message, status_code=status)
 
 
 def build_image_provider() -> ImageProvider:
@@ -204,6 +349,8 @@ def build_image_provider() -> ImageProvider:
     provider = get_image_provider_name()
     if provider == "pollinations":
         return PollinationsImageProvider()
+    if provider == "pixabay":
+        return PixabayImageProvider()
     return ManualImageProvider()
 
 
@@ -215,13 +362,13 @@ def generate_scene_images(
     force: bool = False,
     scene_number: int | None = None,
 ) -> list[Path]:
-    """Ensure scene images exist, recording provenance for Pollinations output."""
+    """Ensure scene images exist, recording provenance for generated output."""
     library = Path(library_path) if library_path else get_licensed_asset_path()
     library.mkdir(parents=True, exist_ok=True)
     selected_provider = provider or build_image_provider()
     if force and isinstance(selected_provider, ManualImageProvider):
         raise ImageGenerationError(
-            "Cannot regenerate an image with IMAGE_PROVIDER=manual; select pollinations."
+            "Cannot regenerate an image with IMAGE_PROVIDER=manual; select an image provider."
         )
 
     selected_scenes = [
@@ -301,17 +448,22 @@ def _update_manifest(
         raise ImageGenerationError(f"Cannot read LICENSES.json: {error.__class__.__name__}") from error
     if not isinstance(manifest, dict):
         raise ImageGenerationError("LICENSES.json must be an object keyed by asset filename.")
-    model = getattr(provider, "model", get_pollinations_model())
-    manifest[filename] = {
-        "source": "Pollinations AI (generated)",
-        "license": "See https://pollinations.ai terms",
-        "author": "Pollinations.AI",
-        "rights_holder": "Pollinations.AI",
-        "url": "https://pollinations.ai",
-        "model": model,
-        "prompt": prompt,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-    }
+    if isinstance(provider, PixabayImageProvider):
+        if provider.provenance is None:
+            raise ImageGenerationError("Pixabay provider did not return provenance metadata.")
+        manifest[filename] = dict(provider.provenance)
+    else:
+        model = getattr(provider, "model", get_pollinations_model())
+        manifest[filename] = {
+            "source": "Pollinations AI (generated)",
+            "license": "See https://pollinations.ai terms",
+            "author": "Pollinations.AI",
+            "rights_holder": "Pollinations.AI",
+            "url": "https://pollinations.ai",
+            "model": model,
+            "prompt": prompt,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -337,3 +489,9 @@ def _update_manifest(
 def _remove_if_present(path: Any) -> None:
     if path is not None:
         Path(path).unlink(missing_ok=True)
+
+
+def _close_response(response: Any) -> None:
+    close = getattr(response, "close", None)
+    if callable(close):
+        close()

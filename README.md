@@ -164,6 +164,8 @@ The manifest is an operator-provided provenance assertion; MotivationOS does not
 
 ### Image generation
 
+To use Pixabay, create an API key through the Pixabay API documentation, set `IMAGE_PROVIDER=pixabay`, and add the key as `PIXABAY_API_KEY` in your ignored local `.env`. Pixabay limits API searches (currently documented as 100 requests per minute per key); honor current account limits and retry later after HTTP 429 responses. MotivationOS requests vertical photos and records each image's creator, Pixabay page URL, image ID, and Pixabay Content License in `LICENSES.json`. Attribution is generally not required by that license, but retain the provenance and credit/link the creator when practical. Review Pixabay's current Content License and API terms before publishing or redistributing images.
+
 Image generation is opt-in. Set `IMAGE_PROVIDER=pollinations` in `.env` to create missing scene images automatically; the default `IMAGE_PROVIDER=manual` preserves the existing local-image workflow. Pollinations requests use `POLLINATIONS_MODEL` (default `flux`) and vertical dimensions from `POLLINATIONS_WIDTH` and `POLLINATIONS_HEIGHT` (defaults `1080x1920`). Generated files and their provenance are saved in `MOTIVATIONOS_LICENSED_ASSET_DIR` and `LICENSES.json`. Existing images are reused as manual overrides and are not regenerated unless explicitly requested.
 
 The basic Pollinations endpoint can be used without a key. Its free tier is rate-limited to roughly one request every 15 seconds, so a multi-scene script may take a little while; retries use increasing delays. Check Pollinations' current account and API documentation for how to obtain and configure an optional `POLLINATIONS_API_KEY`. Never commit that key.

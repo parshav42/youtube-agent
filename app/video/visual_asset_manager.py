@@ -70,12 +70,25 @@ class LicensedLocalAssetManager:
                     for field in ("author", "url", "model", "prompt", "generated_at")
                 )
             )
+            is_pixabay = (
+                has_source_and_license
+                and provenance.get("source") == "Pixabay"
+                and provenance.get("license") == "Pixabay Content License"
+                and isinstance(provenance.get("url"), str)
+                and bool(provenance["url"].strip())
+                and isinstance(provenance.get("user"), str)
+                and bool(provenance["user"].strip())
+                and isinstance(provenance.get("rights_holder"), str)
+                and bool(provenance["rights_holder"].strip())
+                and type(provenance.get("pixabay_id")) is int
+            )
             has_manual_rights_holder = (
                 has_source_and_license
+                and provenance.get("source") != "Pixabay"
                 and isinstance(provenance.get("rights_holder"), str)
                 and bool(provenance["rights_holder"].strip())
             )
-            if not (is_pollinations or has_manual_rights_holder):
+            if not (is_pollinations or is_pixabay or has_manual_rights_holder):
                 raise VisualAssetError(
                     f"Asset {source.name} needs source, license, and rights_holder metadata, "
                     "or complete Pollinations provenance, in LICENSES.json."
@@ -103,6 +116,9 @@ class LicensedLocalAssetManager:
                     "license": provenance["license"],
                     "rights_holder": provenance.get("rights_holder", provenance.get("author", "")),
                     "attribution": provenance.get("attribution", ""),
+                    "url": provenance.get("url", ""),
+                    "user": provenance.get("user", ""),
+                    "pixabay_id": provenance.get("pixabay_id"),
                     "width": width,
                     "height": height,
                     "format": image_format,
