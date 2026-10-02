@@ -193,6 +193,10 @@ def initialize_youtube_database(database_path: str | Path | None = None) -> None
                 updated_at TEXT NOT NULL
             )"""
         )
+        report_columns = {row[1] for row in connection.execute("PRAGMA table_info(report_history)")}
+        for column, declaration in (("sent_at", "TEXT"), ("recipient", "TEXT"), ("status", "TEXT"), ("summary_json", "TEXT")):
+            if column not in report_columns:
+                connection.execute(f"ALTER TABLE report_history ADD COLUMN {column} {declaration}")
         connection.execute(
             """CREATE TABLE IF NOT EXISTS job_executions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

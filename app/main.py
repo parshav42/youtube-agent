@@ -52,6 +52,7 @@ def main() -> int:
         help="Generate research ideas using the configured live LLM provider."
     )
     modes.add_argument("--check-hf", action="store_true", help="Make and print a real HF model inference request.")
+    modes.add_argument("--send-report-now", action="store_true", help="Build and email the daily report immediately.")
     modes.add_argument(
         "--produce-script", type=int, metavar="SCRIPT_ID", help="Produce video only from a script explicitly approved by a human."
     )
@@ -88,6 +89,20 @@ def main() -> int:
         return check_huggingface()
     database_path = get_database_path()
     initialize_database(database_path)
+
+    if args.send_report_now:
+        from app.reporting.daily_report import DailyReportService
+        try:
+            result = DailyReportService(database_path).run()
+        except Exception as error:
+            print(f"Report failed: {error}", file=sys.stderr)
+            return 1
+        if result.get("email", {}).get("sent"):
+            from app.config import get_report_email_to
+            print(f"Report sent to {get_report_email_to()}")
+            return 0
+        print(f"Report send failed: {result.get('email', {}).get('detail') or result.get('email', {}).get('status', 'unknown error')}", file=sys.stderr)
+        return 1
 
     if args.show_rejections:
         rejected = get_rejected_scripts(database_path, limit=10)

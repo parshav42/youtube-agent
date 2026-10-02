@@ -28,6 +28,34 @@ def get_database_path() -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
+def get_smtp_host() -> str:
+    return os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
+
+
+def get_smtp_port() -> int:
+    return _get_int("SMTP_PORT", 587, 1, 65535)
+
+
+def get_smtp_user() -> str:
+    return os.getenv("SMTP_USER", "").strip()
+
+
+def get_smtp_password() -> str:
+    return os.getenv("SMTP_PASSWORD", "")
+
+
+def get_report_email_to() -> str:
+    return os.getenv("REPORT_EMAIL_TO", "parshavkhoche16@gmail.com").strip()
+
+
+def get_report_schedule_cron() -> str:
+    return os.getenv("REPORT_SCHEDULE_CRON", "30 15 * * *").strip()
+
+
+def is_report_enabled() -> bool:
+    return _get_bool("REPORT_ENABLED", True)
+
+
 def get_topic(override: str | None = None) -> str:
     """Return the requested script topic, configured topic, or default."""
     topic = override if override is not None else os.getenv("MOTIVATIONOS_TOPIC", DEFAULT_TOPIC)

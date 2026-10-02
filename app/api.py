@@ -23,6 +23,7 @@ from app.config import (
     get_database_path,
     get_youtube_auto_match_enabled,
     get_production_output_path,
+    is_report_enabled,
 )
 from app.database.db import (
     ScriptNotFoundError,
@@ -140,7 +141,7 @@ def create_app(
             "1", "true", "yes"
         }
         from app.config import get_daily_pipeline_settings
-        if scheduler_requested or get_auto_publish_settings()["enabled"] or get_youtube_auto_match_enabled() or get_daily_pipeline_settings()["cron"]:
+        if scheduler_requested or is_report_enabled() or get_auto_publish_settings()["enabled"] or get_youtube_auto_match_enabled() or get_daily_pipeline_settings()["cron"]:
             scheduler = build_scheduler(str(resolved_path))
             scheduler.start()
         application.state.scheduler = scheduler

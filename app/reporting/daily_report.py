@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from app.config import get_database_path, get_report_output_path
-from app.database.db import _connection
+from app.config import get_database_path, get_report_output_path, get_llm_provider_name, get_smtp_user, get_report_email_to
+from app.database.db import _connection, record_report_sent
 from app.reporting.email_service import EmailDeliveryError, SMTPEmailService
 from app.youtube.analytics import YouTubeAnalyticsService, YouTubeAnalyticsError
 from app.youtube.repository import (
@@ -37,7 +37,7 @@ class DailyReportService:
         self.email = email or SMTPEmailService()
 
     def run(self, report_date: date | None = None) -> dict[str, Any]:
-        target_date = report_date or datetime.now(timezone.utc).date()
+        target_date = report_date or datetime.now(ZoneInfo("Asia/Kolkata")).date()
         day_start = datetime.combine(target_date, time.min, timezone.utc).isoformat()
         day_end = datetime.combine(target_date + timedelta(days=1), time.min, timezone.utc).isoformat()
         productions = get_productions_for_report(day_start, day_end, self.database_path)
@@ -145,7 +145,16 @@ class DailyReportService:
             "analytics": analytics_result,
             "failed_operations": failed_operations,
             "recommended_technical_next_steps": _recommendations(failed_operations, analytics_result),
+            "provider": _provider_status(),
         }
+        with _connection(self.database_path) as connection:
+            script_rows = connection.execute(
+                "SELECT id, status, rejection_reason, rejection_stage, created_at FROM scripts WHERE created_at >= ? AND created_at < ? ORDER BY id",
+                (day_start, day_end),
+            ).fetchall()
+            last_run = connection.execute("SELECT MAX(updated_at) FROM productions").fetchone()[0]
+        report["scripts_generated"] = [dict(row) for row in script_rows]
+        report["last_pipeline_run"] = last_run
         markdown = _render_markdown(report)
         self.output_directory.mkdir(parents=True, exist_ok=True)
         report_path = self.output_directory / f"daily-report-{target_date.isoformat()}.md"
@@ -171,7 +180,8 @@ class DailyReportService:
         save_report(target_date.isoformat(), str(report_path.resolve()), report, email_status, database_path=self.database_path)
         try:
             email_result = self.email.send(
-                subject=f"MotivationOS daily report: {target_date.isoformat()}", body=markdown
+                subject=f"MotivationOS Daily Report — {datetime.now(ZoneInfo('Asia/Kolkata')).date().isoformat()}",
+                body=render_html_report(report)
             )
             email_status = str(email_result["status"])
             email_error = None
@@ -187,7 +197,61 @@ class DailyReportService:
             email_error,
             self.database_path,
         )
+        record_report_sent(
+            datetime.now(timezone.utc).isoformat(), get_report_email_to(),
+            "sent" if email_result.get("sent") else "failed",
+            email_result.get("detail"), json.dumps(report, ensure_ascii=False), self.database_path,
+        )
         return {"report": report, "report_path": str(report_path), "email": email_result}
+
+
+def _provider_status() -> dict[str, Any]:
+    provider = get_llm_provider_name()
+    return {"provider": provider, "status": "configured"}
+
+
+def render_html_report(report: dict[str, Any]) -> str:
+    """Render a compact, inline-styled report; all database values are escaped."""
+    import html
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    esc = lambda value: html.escape(str(value if value is not None else "—"), quote=True)
+    productions = report.get("videos_produced", [])
+    scripts = report.get("scripts_generated", [])
+    analytics = report.get("analytics", {})
+    rows = []
+    for item in productions:
+        rows.append(f"<li>Production {esc(item.get('production_id'))}: {esc(item.get('topic'))} — {esc(item.get('production_status'))}; upload {esc(item.get('upload_status'))}</li>")
+    if not rows: rows = ["<li>No videos produced today.</li>"]
+    script_list = "".join(f"<li>Script {esc(item.get('id'))}: {esc(item.get('status'))}{(' — ' + esc(item.get('rejection_reason'))) if item.get('rejection_reason') else ''}</li>" for item in scripts) or "<li>No scripts generated today.</li>"
+    video_stats = []
+    for video in analytics.get("videos", []):
+        for day in video.get("rows", []):
+            metrics = day.get("metrics", {})
+            video_stats.append(f"<li>{esc(video.get('video_id'))}: {esc(metrics.get('views', 0))} views, {esc(metrics.get('likes', 0))} likes, {esc(metrics.get('comments', 0))} comments, {esc(metrics.get('estimatedMinutesWatched', 'N/A'))} watch minutes</li>")
+    items = []
+    pending = report.get("items_waiting_for_review", {}).get("total", 0)
+    if report.get("uploads_succeeded", 0) < 1: items.append("Upload 1 video to YouTube")
+    if pending: items.append(f"Review {pending} scripts")
+    items.extend(report.get("recommended_technical_next_steps", []))
+    actions = "".join(f"<li>{esc(item)}</li>" for item in items) or "<li>No action items.</li>"
+    errors = "".join(f"<li>{esc(item.get('type'))}: {esc(item.get('error'))}</li>" for item in report.get("failed_operations", [])) or "<li>None recorded.</li>"
+    day = datetime.fromisoformat(report["report_date"]).date()
+    date_ist = datetime.combine(day, time.min, ZoneInfo("Asia/Kolkata")).strftime("%A, %d %B %Y")
+    sections = [
+        f"<h1>MotivationOS Daily Report</h1><p>{esc(date_ist)} (IST)</p>",
+        f"<h2>Today's Pipeline Activity</h2><p>Scripts generated: {len(scripts)} (IDs: {esc(', '.join(str(x.get('id')) for x in scripts) or 'none')})</p><ul>{script_list}</ul><ul>{''.join(rows)}</ul>",
+        f"<h2>YouTube Analytics (last 24h)</h2><p>Total channel views: {esc(_total_channel_views(analytics))}</p><ul>{''.join(video_stats) or '<li>No video analytics available.</li>'}</ul>",
+        f"<h2>Queue Status</h2><p>Videos ready/manual upload: {esc(sum(1 for x in productions if x.get('upload_status') in ('manual','awaiting_review','pending')))}; scripts awaiting review: {esc(pending)}</p><p><a href='http://127.0.0.1:8000/production-review'>Open production dashboard</a></p>",
+        f"<h2>System Health</h2><p>LLM provider: {esc(report.get('provider', {}).get('provider'))} ({esc(report.get('provider', {}).get('status'))})<br>Groq quota: {esc(report.get('quota_usage', {}).get('quota_units_remaining', 'unavailable'))}<br>Last successful pipeline run: {esc(report.get('last_pipeline_run'))}</p><ul>{errors}</ul>",
+        f"<h2>Action Items</h2><ul>{actions}</ul>",
+    ]
+    return '<!doctype html><html><body style="margin:0;padding:16px;background:#f4f6f8;font-family:Arial,sans-serif;color:#17212b"><main style="max-width:680px;margin:auto;background:#fff;padding:20px;border-radius:10px">' + ''.join(sections) + '</main></body></html>'
+
+
+def _total_channel_views(analytics: dict[str, Any]) -> int:
+    return sum(int(row.get("metrics", {}).get("views", 0)) for row in (analytics.get("channel") or {}).get("rows", []))
 
 
 def _safe_error(error: Exception) -> str:

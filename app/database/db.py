@@ -113,6 +113,30 @@ def initialize_database(database_path: str | Path | None = None) -> None:
             connection.execute("ALTER TABLE scripts ADD COLUMN rejection_stage TEXT")
 
 
+def record_report_sent(
+    sent_at: str, recipient: str, status: str, error: str | None = None,
+    summary_json: str = "{}", database_path: str | Path | None = None,
+) -> None:
+    """Record a delivery outcome in the additive report history store."""
+    if status not in {"sent", "failed"}:
+        raise ValueError("Report status must be 'sent' or 'failed'.")
+    from app.youtube.repository import initialize_youtube_database
+    initialize_youtube_database(database_path)
+    with _connection(database_path) as connection:
+        report_date = sent_at[:10]
+        exists = connection.execute("SELECT id FROM report_history WHERE report_date = ?", (report_date,)).fetchone()
+        if exists:
+            connection.execute(
+                "UPDATE report_history SET sent_at=?, recipient=?, status=?, error=?, summary_json=?, updated_at=? WHERE report_date=?",
+                (sent_at, recipient, status, error, summary_json, sent_at, report_date),
+            )
+        else:
+            connection.execute(
+                "INSERT INTO report_history (report_date,report_path,report_json,email_status,emailed_at,error,created_at,updated_at,sent_at,recipient,status,summary_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (report_date, "", summary_json, status, sent_at if status == "sent" else None, error, sent_at, sent_at, sent_at, recipient, status, summary_json),
+            )
+
+
 def _serialize_result(result: ResearchResult) -> dict[str, Any]:
     """Convert Pydantic models or mappings into JSON-compatible dictionaries."""
     if isinstance(result, BaseModel):
