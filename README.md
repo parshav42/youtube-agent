@@ -132,6 +132,8 @@ uvicorn app.api:app --host 127.0.0.1 --port 8000
 
 Then open [http://127.0.0.1:8000/production-review](http://127.0.0.1:8000/production-review) to review productions. The server binds to your own computer (`127.0.0.1`).
 
+Set `ADMIN_PASSWORD` in `.env` to choose the dashboard password (the default is `motivationos`; change it before using the dashboard). The password must be at least 4 characters. It is stored in the browser's `sessionStorage` only: refreshing the page keeps you signed in, while closing the tab logs you out. Changing the value in `.env` takes effect after restarting the server.
+
 ## Optional: daily email report
 
 MotivationOS can send a daily production and YouTube report through Gmail SMTP. APScheduler runs it with the API app. Add a Gmail App Password to `SMTP_PASSWORD` in `.env` and set the recipient in `REPORT_EMAIL_TO`. The default cron schedule, `30 15 * * *`, runs at 15:30 UTC (9:00 PM India time). Set `REPORT_ENABLED=false` to turn it off. See `.env.example` for all report settings.

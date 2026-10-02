@@ -44,6 +44,22 @@ def get_smtp_password() -> str:
     return os.getenv("SMTP_PASSWORD", "")
 
 
+def get_admin_password() -> str:
+    """Return the configured dashboard password, retaining legacy token names."""
+    password = os.getenv("ADMIN_PASSWORD")
+    if password is None:
+        password = os.getenv("MOTIVATIONOS_ADMIN_PASSWORD")
+    if password is None:
+        password = os.getenv("ADMIN_TOKEN")
+    if password is None:
+        password = os.getenv("MOTIVATIONOS_ADMIN_TOKEN")
+    if password is None:
+        password = "motivationos"
+    if len(password) < 4:
+        raise ValueError("ADMIN_PASSWORD must be at least 4 characters.")
+    return password
+
+
 def get_report_email_to() -> str:
     return os.getenv("REPORT_EMAIL_TO", "parshavkhoche16@gmail.com").strip()
 

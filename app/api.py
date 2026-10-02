@@ -5,19 +5,21 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from app.config import (
+    get_admin_password,
     get_auto_publish_enabled,
     get_auto_publish_settings,
     get_database_path,
@@ -48,6 +50,8 @@ _bearer = HTTPBearer(auto_error=False)
 logger = logging.getLogger(__name__)
 _daily_jobs: dict[str, dict[str, Any]] = {}
 _daily_jobs_lock = threading.Lock()
+_admin_failures: dict[str, list[float]] = {}
+_admin_failures_lock = threading.Lock()
 
 
 class ProductionArtifactFiles(StaticFiles):
@@ -194,14 +198,47 @@ def create_app(
         return FileResponse(static_directory / "index.html")
 
     def require_admin(
+        request: Request,
         credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+        x_admin_password: str | None = Header(default=None, alias="X-Admin-Password"),
     ) -> None:
-        expected = os.getenv("MOTIVATIONOS_ADMIN_TOKEN", "")
-        if not expected:
-            raise HTTPException(status_code=503, detail="Administrative API is not configured.")
-        supplied = credentials.credentials if credentials else ""
+        expected = get_admin_password()
+        supplied = x_admin_password
+        if supplied is None and credentials is not None:
+            supplied = credentials.credentials
+        if supplied is None:
+            raise HTTPException(status_code=401, detail="Password required")
         if not hmac.compare_digest(supplied, expected):
-            raise HTTPException(status_code=401, detail="Administrative authorization required.")
+            client_ip = (
+                request.client.host
+                if request is not None and request.client is not None
+                else None
+            )
+            if client_ip is not None:
+                now = time.monotonic()
+                with _admin_failures_lock:
+                    for address, recorded in list(_admin_failures.items()):
+                        active = [attempt for attempt in recorded if now - attempt < 60]
+                        if active:
+                            _admin_failures[address] = active
+                        else:
+                            _admin_failures.pop(address, None)
+                    attempts = [
+                        attempt for attempt in _admin_failures.get(client_ip, [])
+                        if now - attempt < 60
+                    ]
+                    attempts.append(now)
+                    _admin_failures[client_ip] = attempts
+                if len(attempts) >= 5:
+                    raise HTTPException(status_code=429, detail="Too many incorrect password attempts.")
+            raise HTTPException(status_code=401, detail="Invalid password")
+        if request is not None and request.client is not None:
+            with _admin_failures_lock:
+                _admin_failures.pop(request.client.host, None)
+
+    @application.get("/api/auth/validate", dependencies=[Depends(require_admin)])
+    def validate_admin_password() -> dict[str, bool]:
+        return {"authenticated": True}
 
     @application.post("/api/daily-pipeline", dependencies=[Depends(require_admin)])
     def start_daily_pipeline() -> dict[str, str]:
