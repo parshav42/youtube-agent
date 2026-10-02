@@ -151,7 +151,7 @@ def test_production_generates_images_manifest_and_reuses_them_on_resume(
         assert manifest[filename]["model"] == provider.model
 
     resumed = service.resume(first_attempt["id"])
-    assert resumed["status"] == "completed"
+    assert resumed["status"] == "ready_for_manual_upload"
     assert len(provider.prompts) == len(script.scenes)
 
 

@@ -124,7 +124,7 @@ def get_youtube_visibility() -> str:
 
 def get_auto_publish_settings() -> dict[str, object]:
     """Parse fail-closed automatic publishing policy and quota configuration."""
-    enabled = _get_bool("AUTO_PUBLISH_ENABLED", False)
+    enabled = get_auto_publish_enabled()
     visibility = os.getenv("YOUTUBE_PRIVACY_STATUS", "public").strip().lower()
     if visibility not in {"private", "unlisted", "public"}:
         raise ValueError("YOUTUBE_PRIVACY_STATUS must be private, unlisted, or public.")
@@ -150,6 +150,11 @@ def get_auto_publish_settings() -> dict[str, object]:
         "notify_subscribers": _get_bool("YOUTUBE_NOTIFY_SUBSCRIBERS", True),
         "made_for_kids": _get_bool("YOUTUBE_MADE_FOR_KIDS", False),
     }
+
+
+def get_auto_publish_enabled() -> bool:
+    """Return only the API upload feature flag without validating upload settings."""
+    return _get_bool("AUTO_PUBLISH_ENABLED", False)
 
 
 def get_youtube_auto_match_enabled() -> bool:
