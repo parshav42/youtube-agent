@@ -89,6 +89,9 @@ def test_production_review_auth_and_one_time_approval(tmp_path, monkeypatch):
     decision_route = next(route for route in application.routes if getattr(route, "path", None) == "/api/productions/{production_id}/review/{decision}")
     body = ProductionReviewDecision(confirm_review=True, reviewer="Local reviewer")
     assert decision_route.endpoint("fixture-production", "approve", body)["status"] == "completed"
+    assert decision_route.endpoint("fixture-production", "approve", body) == {
+        "production_id": "fixture-production", "status": "already_approved"
+    }
     with pytest.raises(HTTPException) as repeated:
         decision_route.endpoint("fixture-production", "reject", body)
     assert repeated.value.status_code == 409

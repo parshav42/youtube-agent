@@ -14,8 +14,6 @@
   }
 
   function clearVideo() {
-    if (video.dataset.objectUrl) URL.revokeObjectURL(video.dataset.objectUrl);
-    delete video.dataset.objectUrl;
     video.removeAttribute("src");
     video.load();
   }
@@ -32,7 +30,7 @@
   }
 
   async function request(path, options = {}) {
-    const { responseType, ...fetchOptions } = options;
+    const fetchOptions = options;
     let response;
     try {
       response = await fetch(path, {
@@ -46,7 +44,6 @@
     } catch {
       throw new Error("Could not reach the local API. Check that the server is running and try again.");
     }
-    if (response.ok && responseType === "blob") return response;
     let payload = null;
     try {
       payload = await response.json();
@@ -129,7 +126,7 @@
     byId("description").textContent = data.description || "Description unavailable";
     byId("status").textContent = data.status || "Status unavailable";
     const manualUploadSection = byId("manual-upload-link");
-    manualUploadSection.hidden = !["ready_for_manual_upload", "completed", "published"].includes(data.status);
+    manualUploadSection.hidden = !(data.status === "ready_for_manual_upload" || (data.status === "needs_review" && data.video_exists));
     byId("youtube-url").value = data.youtube_url || "";
     byId("manual-upload-status").textContent = data.status === "published"
       ? "YouTube video linked."
@@ -151,6 +148,13 @@
           : "A separate human audio decision is not required.";
     byId("audio-approve").hidden = !audioReviewRequired;
     byId("audio-reject").hidden = !audioReviewRequired;
+    byId("video-unavailable").hidden = Boolean(data.video_exists);
+    byId("video-unavailable").textContent = `Video not yet rendered. Current status: ${data.status || "unknown"}.`;
+    if (data.video_exists && typeof data.video_url === "string") {
+      video.src = data.video_url;
+    } else {
+      clearVideo();
+    }
   }
 
   async function loadReview() {
@@ -160,16 +164,6 @@
       const data = await request(`/api/productions/${encodeURIComponent(productionId)}/review`);
       renderReview(data);
       content.hidden = false;
-      try {
-        const media = await request(data.video_url, { responseType: "blob" });
-        if (video.dataset.objectUrl) URL.revokeObjectURL(video.dataset.objectUrl);
-        video.dataset.objectUrl = URL.createObjectURL(await media.blob());
-        video.src = video.dataset.objectUrl;
-      } catch (cause) {
-        if (cause.authFailure) throw cause;
-        clearVideo();
-        showError(cause instanceof Error ? cause.message : "Final video preview is unavailable.");
-      }
     } catch (cause) {
       if (cause.authFailure) showAuth(cause.message);
       else showError(cause instanceof Error ? cause.message : "Review request failed.");
