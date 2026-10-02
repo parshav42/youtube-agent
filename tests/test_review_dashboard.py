@@ -44,6 +44,25 @@ def test_review_dashboard_serves_static_assets_without_weakening_api_auth(
     assert require_admin(credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials="dashboard-test-token")) is None
 
 
+def test_navigation_home_and_script_are_served(tmp_path):
+    application = create_app(tmp_path / "navigation.sqlite3")
+    home_route = next(route for route in application.routes if getattr(route, "path", None) == "/")
+    home = home_route.endpoint()
+    assert home.status_code == 200
+    assert "MotivationOS" in Path(home.path).read_text(encoding="utf-8")
+
+    static = Path(__file__).resolve().parents[1] / "app" / "static"
+    nav_script = (static / "nav.js").read_text(encoding="utf-8")
+    assert "window.location.pathname" in nav_script
+    for filename in ("review.html", "production-review.html"):
+        assert "nav.js" in (static / filename).read_text(encoding="utf-8")
+
+    mount = next(route for route in application.routes if getattr(route, "name", None) == "review-assets")
+    response = asyncio.run(mount.app.get_response("nav.js", {"method": "GET", "headers": []}))
+    assert response.status_code == 200
+    assert response.media_type in {"text/javascript", "application/javascript"}
+
+
 def test_production_review_page_is_local_and_cannot_upload(tmp_path) -> None:
     application = create_app(tmp_path / "production-dashboard.sqlite3")
     page_route = next(route for route in application.routes if getattr(route, "path", None) == "/production-review")

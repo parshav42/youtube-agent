@@ -1,0 +1,106 @@
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+ERROR: NGROK_DOMAIN not set in .env
+/home/parshav/MotivationOS/.env: line 31: dacz: command not found
+/home/parshav/MotivationOS/.env: line 37: 15: command not found
+t=2026-10-02T19:35:39+0530 lvl=info msg="command usage" msg="Flag --domain has been deprecated, use --url instead"
+t=2026-10-02T19:35:39+0530 lvl=info msg="no configuration paths supplied"
+t=2026-10-02T19:35:39+0530 lvl=info msg="using configuration at default config path" path=/home/parshav/.config/ngrok/ngrok.yml
+t=2026-10-02T19:35:39+0530 lvl=info msg="open config file" path=/home/parshav/.config/ngrok/ngrok.yml err=<nil>
+t=2026-10-02T19:35:39+0530 lvl=info msg="FIPS 140 mode" enabled=false
+t=2026-10-02T19:35:39+0530 lvl=info msg="starting web service" obj=web addr=127.0.0.1:4040 allow_hosts=[]
+t=2026-10-02T19:35:40+0530 lvl=info msg="client session established" obj=tunnels.session
+t=2026-10-02T19:35:40+0530 lvl=info msg="tunnel session started" obj=tunnels.session
+t=2026-10-02T19:35:40+0530 lvl=info msg="started tunnel" obj=tunnels name=command_line addr=http://localhost:8000 url=https://shale-frequency-blast.ngrok-free.dev
+t=2026-10-02T19:36:53+0530 lvl=info msg="INFO received stop request obj=app stopReq=\"{err:<nil> restart:false}\""
+t=2026-10-02T19:36:53+0530 lvl=info msg="session closing" obj=tunnels.session err=<nil>
+t=2026-10-02T19:36:53+0530 lvl=info msg="accept failed" obj=tunnels.session err="reconnecting session closed" obj=csess id=dd8e2726a757
+t=2026-10-02T19:36:53+0530 lvl=info msg="failed to accept connection: Listener closed" obj=tunnels.session clientid=881c5d4f488b91961c496431de15afbe
+t=2026-10-02T19:36:53+0530 lvl=warn msg="Stopping forwarder" name=command_line acceptErr="failed to accept connection: Listener closed"
+t=2026-10-02T19:36:53+0530 lvl=info msg="command usage" msg="Flag --domain has been deprecated, use --url instead"
+t=2026-10-02T19:36:53+0530 lvl=info msg="no configuration paths supplied"
+t=2026-10-02T19:36:53+0530 lvl=info msg="using configuration at default config path" path=/home/parshav/.config/ngrok/ngrok.yml
+t=2026-10-02T19:36:53+0530 lvl=info msg="open config file" path=/home/parshav/.config/ngrok/ngrok.yml err=<nil>
+t=2026-10-02T19:36:53+0530 lvl=info msg="FIPS 140 mode" enabled=false
+t=2026-10-02T19:36:53+0530 lvl=info msg="starting web service" obj=web addr=127.0.0.1:4040 allow_hosts=[]
+t=2026-10-02T19:36:58+0530 lvl=warn msg="failed to check for update" obj=updater err="Post \"https://update.ngrok-agent.com/check\": context deadline exceeded"
+t=2026-10-02T19:37:02+0530 lvl=info msg="client session established" obj=tunnels.session
+t=2026-10-02T19:37:02+0530 lvl=info msg="tunnel session started" obj=tunnels.session
+t=2026-10-02T19:37:03+0530 lvl=info msg="started tunnel" obj=tunnels name=command_line addr=http://localhost:8000 url=https://shale-frequency-blast.ngrok-free.dev
+t=2026-10-02T19:37:23+0530 lvl=info msg="join connections" obj=join id=352b5835ee63 l=127.0.0.1:8000 r=[2401:4900:52b7:8a2a:fde1:3271:8cf2:6019]:59980
+t=2026-10-02T19:38:20+0530 lvl=info msg="join connections" obj=join id=e89d02b303f1 l=127.0.0.1:8000 r=[2401:4900:52b7:8a2a:fde1:3271:8cf2:6019]:34950
+t=2026-10-02T19:38:20+0530 lvl=info msg="join connections" obj=join id=4979adfa7270 l=127.0.0.1:8000 r=[2401:4900:52b7:8a2a:fde1:3271:8cf2:6019]:34950
+t=2026-10-02T19:38:56+0530 lvl=info msg="join connections" obj=join id=be9cbca9b740 l=127.0.0.1:8000 r=[2401:4900:52b7:8a2a:fde1:3271:8cf2:6019]:34950
+t=2026-10-02T19:39:06+0530 lvl=info msg="join connections" obj=join id=711729bc4865 l=127.0.0.1:8000 r=[2401:4900:52b7:8a2a:fde1:3271:8cf2:6019]:34950
+t=2026-10-02T19:44:46+0530 lvl=eror msg="heartbeat timeout, terminating session" obj=tunnels.session obj=csess id=0462b5a3f389 clientid=468ebaf1f92d64cf1d56b8f4943e68f6
+t=2026-10-02T19:44:46+0530 lvl=eror msg="session closed, starting reconnect loop" obj=tunnels.session obj=csess id=1c2c15823938 err="session closed"
+t=2026-10-02T19:45:06+0530 lvl=eror msg="failed to reconnect session" obj=tunnels.session err="failed to send authentication request: failed to fetch CRL. errors encountered: timed out fetching CRL"
+t=2026-10-02T19:45:22+0530 lvl=info msg="client session established" obj=tunnels.session
+t=2026-10-02T19:45:22+0530 lvl=info msg="tunnel session started" obj=tunnels.session
+t=2026-10-02T19:47:00+0530 lvl=info msg="INFO received stop request obj=app stopReq=\"{err:<nil> restart:false}\""
+t=2026-10-02T19:47:00+0530 lvl=info msg="session closing" obj=tunnels.session err=<nil>
+t=2026-10-02T19:47:00+0530 lvl=info msg="accept failed" obj=tunnels.session obj=csess id=1c2c15823938 err="reconnecting session closed"
+t=2026-10-02T19:47:00+0530 lvl=info msg="no more state changes" obj=tunnels.session
+t=2026-10-02T19:47:00+0530 lvl=info msg="command usage" msg="Flag --domain has been deprecated, use --url instead"
+t=2026-10-02T19:47:00+0530 lvl=info msg="no configuration paths supplied"
+t=2026-10-02T19:47:00+0530 lvl=info msg="using configuration at default config path" path=/home/parshav/.config/ngrok/ngrok.yml
+t=2026-10-02T19:47:00+0530 lvl=info msg="open config file" path=/home/parshav/.config/ngrok/ngrok.yml err=<nil>
+t=2026-10-02T19:47:00+0530 lvl=info msg="FIPS 140 mode" enabled=false
+t=2026-10-02T19:47:00+0530 lvl=info msg="starting web service" obj=web addr=127.0.0.1:4040 allow_hosts=[]
+t=2026-10-02T19:47:01+0530 lvl=info msg="client session established" obj=tunnels.session
+t=2026-10-02T19:47:01+0530 lvl=info msg="tunnel session started" obj=tunnels.session
+t=2026-10-02T19:47:01+0530 lvl=info msg="started tunnel" obj=tunnels name=command_line addr=http://localhost:8000 url=https://shale-frequency-blast.ngrok-free.dev
+t=2026-10-02T19:47:05+0530 lvl=info msg="join connections" obj=join id=87508099dbaa l=127.0.0.1:8000 r=[2401:4900:52b7:8a2a:fde1:3271:8cf2:6019]:39012
+t=2026-10-02T19:47:20+0530 lvl=info msg="join connections" obj=join id=10eeeebee9be l=127.0.0.1:8000 r=[2401:4900:52b7:8a2a:fde1:3271:8cf2:6019]:39012
+t=2026-10-02T19:47:21+0530 lvl=info msg="join connections" obj=join id=b102fd55a654 l=127.0.0.1:8000 r=[2401:4900:52b7:8a2a:fde1:3271:8cf2:6019]:39012
+t=2026-10-02T19:47:41+0530 lvl=info msg="join connections" obj=join id=4e3b3b777d62 l=127.0.0.1:8000 r=[2401:4900:52b7:8a2a:fde1:3271:8cf2:6019]:39012
+t=2026-10-02T19:49:02+0530 lvl=info msg="join connections" obj=join id=1a72e8c8f7e1 l=127.0.0.1:8000 r=[2401:4900:52b7:8a2a:fde1:3271:8cf2:6019]:39012
+t=2026-10-02T19:49:08+0530 lvl=info msg="join connections" obj=join id=ed5a7b43d763 l=127.0.0.1:8000 r=[2401:4900:52b7:8a2a:fde1:3271:8cf2:6019]:39012

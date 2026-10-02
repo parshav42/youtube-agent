@@ -173,7 +173,7 @@ def create_app(
             static_directory / "review.html",
             headers={
                 "Content-Security-Policy": (
-                    "default-src 'none'; script-src 'self'; style-src 'self'; "
+                    "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
                     "connect-src 'self'; img-src 'self' data:; base-uri 'none'; "
                     "form-action 'none'; frame-ancestors 'none'"
                 ),
@@ -185,9 +185,13 @@ def create_app(
     @application.get("/production-review", include_in_schema=False)
     def production_review_page() -> FileResponse:
         return FileResponse(static_directory / "production-review.html", headers={
-            "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' blob: data:; media-src 'self' blob: data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+            "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' blob: data:; media-src 'self' blob: data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
             "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
         })
+
+    @application.get("/", include_in_schema=False)
+    def home_page() -> FileResponse:
+        return FileResponse(static_directory / "index.html")
 
     def require_admin(
         credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
