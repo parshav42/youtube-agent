@@ -281,7 +281,14 @@ def _safe_error(error: Exception) -> str:
     import re
 
     message = f"{type(error).__name__}: {error}"
-    for key in ("HF_TOKEN", "ELEVENLABS_API_KEY", "MOTIVATIONOS_ADMIN_TOKEN"):
+    for key in (
+        "HF_TOKEN",
+        "ELEVENLABS_API_KEY",
+        "ADMIN_PASSWORD",
+        "MOTIVATIONOS_ADMIN_PASSWORD",
+        "ADMIN_TOKEN",
+        "MOTIVATIONOS_ADMIN_TOKEN",
+    ):
         secret = os.getenv(key)
         if secret:
             message = message.replace(secret, "[REDACTED]")

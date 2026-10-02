@@ -579,6 +579,9 @@ def _safe_failure(error: Exception) -> str:
     for key in (
         "HF_TOKEN",
         "ELEVENLABS_API_KEY",
+        "ADMIN_PASSWORD",
+        "MOTIVATIONOS_ADMIN_PASSWORD",
+        "ADMIN_TOKEN",
         "MOTIVATIONOS_ADMIN_TOKEN",
         "GOOGLE_CLIENT_SECRET",
     ):

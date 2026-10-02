@@ -7,6 +7,7 @@
   <title>Script Review | MotivationOS</title>
   <link rel="stylesheet" href="/review-assets/review.css">
   <script src="/review-assets/nav.js" defer></script>
+  <script src="/review-assets/admin-auth.js" defer></script>
   <script src="/review-assets/review.js" defer></script>
 </head>
 <body style="padding-top: 56px">
@@ -35,10 +36,7 @@
       <form id="auth-form" class="auth-form">
         <label for="reviewer-input">Reviewer name</label>
         <input id="reviewer-input" name="reviewer" type="text" maxlength="100" autocomplete="name" required>
-        <label for="token-input">Admin token</label>
-        <input id="token-input" name="token" type="password" autocomplete="off" required>
         <button class="button button-primary" type="submit">Open review queue <span aria-hidden="true">&#8594;</span></button>
-        <p class="form-note">Your token stays in this page's memory and is cleared when you sign out or close the tab.</p>
       </form>
     </section>
 
@@ -79,6 +77,19 @@
       </div>
     </section>
   </main>
+
+  <dialog id="password-dialog" class="decision-dialog" aria-labelledby="password-heading">
+    <form id="password-form">
+      <p class="eyebrow">Admin sign in</p>
+      <h2 id="password-heading">Enter your password</h2>
+      <label for="password-input">Admin password</label>
+      <input id="password-input" type="password" minlength="4" autocomplete="current-password" required>
+      <p id="password-error" class="dialog-message" role="alert" aria-live="polite"></p>
+      <div class="dialog-actions">
+        <button class="button button-primary" type="submit">Sign in</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="decision-dialog" class="decision-dialog">
     <form method="dialog" id="decision-form">
