@@ -6,18 +6,30 @@ import sys
 from typing import Any
 
 from app.agents.research_agent import HuggingFaceResearchProvider
-from app.config import get_database_path, get_niche, get_quality_threshold, get_topic
+from app.config import (
+    get_database_path,
+    get_licensed_asset_path,
+    get_niche,
+    get_quality_threshold,
+    get_topic,
+)
 from app.database.db import (
     ScriptNotFoundError,
     ScriptReviewError,
     get_latest_research,
+    get_script_by_id,
     initialize_database,
     review_script,
 )
 from app.graph.workflow import build_workflow
 from app.providers.huggingface_llm import HuggingFaceLLMProvider
 from app.providers.llm_factory import build_llm_provider
-from app.schemas.script_schema import ScriptRequest
+from app.schemas.script_schema import MotivationalScript, ScriptRequest
+from app.video.image_generator import (
+    ImageGenerationError,
+    build_image_provider,
+    generate_scene_images,
+)
 
 
 def main() -> int:
@@ -46,6 +58,16 @@ def main() -> int:
     modes.add_argument(
         "--approve-script", type=int, metavar="SCRIPT_ID", help="Record explicit human approval of a passing script."
     )
+    modes.add_argument(
+        "--generate-images", type=int, metavar="SCRIPT_ID", help="Generate or reuse images for every scene in a script."
+    )
+    modes.add_argument(
+        "--regenerate-image",
+        nargs=2,
+        type=int,
+        metavar=("SCRIPT_ID", "SCENE_NUMBER"),
+        help="Force regeneration of one scene image.",
+    )
     parser.add_argument("--reviewer", help="Human reviewer name required with --approve-script.")
     parser.add_argument(
         "--debug", action="store_true", help="Re-raise exceptions caught by the video production workflow."
@@ -67,6 +89,16 @@ def main() -> int:
             print("--reviewer is required with --approve-script.", file=sys.stderr)
             return 2
         return approve_script(args.approve_script, args.reviewer, database_path)
+    if args.generate_images is not None:
+        return generate_images(args.generate_images, database_path)
+    if args.regenerate_image is not None:
+        script_id, scene_number = args.regenerate_image
+        return generate_images(
+            script_id,
+            database_path,
+            scene_number=scene_number,
+            force=True,
+        )
     if args.research or args.research_with_hf:
         research_provider = None
         if args.research_with_hf:
@@ -206,6 +238,47 @@ def approve_script(script_id: int, reviewer: str, database_path: str) -> int:
     print(f"Status: {record['status']}")
     print(f"Reviewed by: {record['reviewed_by']}")
     print(f"Reviewed at: {record['reviewed_at']}")
+    return 0
+
+
+def generate_images(
+    script_id: int,
+    database_path: str,
+    *,
+    scene_number: int | None = None,
+    force: bool = False,
+) -> int:
+    """Generate or list scene assets without starting video production."""
+    record = get_script_by_id(script_id, database_path)
+    if record is None:
+        print(f"Script record {script_id} was not found.", file=sys.stderr)
+        return 1
+    try:
+        script = MotivationalScript.model_validate(record["script"])
+        provider = build_image_provider()
+        library = get_licensed_asset_path()
+        existing = {
+            path.resolve()
+            for scene in script.scenes
+            for path in library.glob(f"scene_{scene.scene_number:02d}.*")
+            if path.is_file()
+        }
+        paths = generate_scene_images(
+            script.scenes,
+            library_path=library,
+            provider=provider,
+            force=force,
+            scene_number=scene_number,
+        )
+    except (ImageGenerationError, ValueError) as error:
+        print(f"Image generation failed: {error}", file=sys.stderr)
+        return 1
+    for path in paths:
+        if force or path.resolve() not in existing:
+            print(f"Wrote image: {path}")
+        else:
+            print(f"Reused image: {path}")
+    print(f"LICENSES.json: {library / 'LICENSES.json'}")
     return 0
 
 

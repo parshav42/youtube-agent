@@ -77,6 +77,43 @@ def get_licensed_asset_path() -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
+def get_image_provider_name() -> str:
+    """Return the selected image provider, defaulting to manual local assets."""
+    provider = os.getenv("IMAGE_PROVIDER", "manual").strip().lower()
+    if provider not in {"manual", "pollinations"}:
+        raise ValueError("IMAGE_PROVIDER must be 'pollinations' or 'manual'.")
+    return provider
+
+
+def get_pollinations_model() -> str:
+    """Return the Pollinations image model name."""
+    model = os.getenv("POLLINATIONS_MODEL", "flux").strip()
+    if not model:
+        raise ValueError("POLLINATIONS_MODEL must not be empty.")
+    return model
+
+
+def get_pollinations_api_key() -> str | None:
+    """Return an optional Pollinations API key without exposing it."""
+    key = os.getenv("POLLINATIONS_API_KEY", "").strip()
+    return key or None
+
+
+def get_pollinations_width() -> int:
+    """Return the requested Pollinations image width."""
+    return _get_int("POLLINATIONS_WIDTH", 1080, 320, 4096)
+
+
+def get_pollinations_height() -> int:
+    """Return the requested Pollinations image height."""
+    return _get_int("POLLINATIONS_HEIGHT", 1920, 320, 4096)
+
+
+def get_pollinations_timeout_seconds() -> int:
+    """Return the Pollinations request timeout in seconds."""
+    return _get_int("POLLINATIONS_TIMEOUT_SECONDS", 120, 1, 600)
+
+
 def get_youtube_visibility() -> str:
     """Return the configured default visibility; publishing still needs explicit approval."""
     visibility = os.getenv("MOTIVATIONOS_YOUTUBE_VISIBILITY", "private").strip().lower()

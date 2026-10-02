@@ -175,6 +175,21 @@ Set `MOTIVATIONOS_LICENSED_ASSET_DIR` to a directory of user-supplied, authorize
 
 The manifest is an operator-provided provenance assertion; MotivationOS does not independently adjudicate rights. Invalid, missing, or undocumented assets fail closed.
 
+### Image generation
+
+Image generation is opt-in. Set `IMAGE_PROVIDER=pollinations` in `.env` to create missing scene images automatically; the default `IMAGE_PROVIDER=manual` preserves the existing local-image workflow. Pollinations requests use `POLLINATIONS_MODEL` (default `flux`) and vertical dimensions from `POLLINATIONS_WIDTH` and `POLLINATIONS_HEIGHT` (defaults `1080x1920`). Generated files and their provenance are saved in `MOTIVATIONOS_LICENSED_ASSET_DIR` and `LICENSES.json`. Existing images are reused as manual overrides and are not regenerated unless explicitly requested.
+
+The basic Pollinations endpoint can be used without a key. Its free tier is rate-limited to roughly one request every 15 seconds, so a multi-scene script may take a little while; retries use increasing delays. Check Pollinations' current account and API documentation for how to obtain and configure an optional `POLLINATIONS_API_KEY`. Never commit that key.
+
+Generate or reuse images for every scene, or force regeneration for one scene:
+
+```bash
+python -m app.main --generate-images 6
+python -m app.main --regenerate-image 6 1
+```
+
+To return to manually supplied images, set `IMAGE_PROVIDER=manual`; provide one authorized image per scene and its provenance in `LICENSES.json`. Pollinations images are intended for prototyping. Review Pollinations' current terms of use and applicable downstream platform policies, including YouTube's, before publishing.
+
 ### Paths
 
 - `MOTIVATIONOS_DB_PATH` defaults to `data/motivationos.sqlite3`. `scripts` and `productions` tables are additive; existing research data is preserved.

@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.metadata_agent import generate_metadata
-from app.config import get_database_path, get_production_output_path
+from app.config import (
+    get_database_path,
+    get_image_provider_name,
+    get_licensed_asset_path,
+    get_production_output_path,
+)
 from app.audio.quality import run_audio_quality_assurance
 from app.database.db import (
     create_production,
@@ -21,7 +26,12 @@ from app.video.subtitle_engine import generate_srt
 from app.video.tts_engine import build_tts_provider, validate_audio
 from app.video.video_assembler import VideoAssembler
 from app.video.quality import run_video_quality_assurance
-from app.video.visual_asset_manager import LicensedLocalAssetManager
+from app.video.visual_asset_manager import LicensedLocalAssetManager, VisualAssetError
+from app.video.image_generator import (
+    ImageGenerationError,
+    build_image_provider,
+    generate_scene_images,
+)
 
 
 class ProductionService:
@@ -155,8 +165,9 @@ class ProductionService:
             self._update(production_id, "generating_audio", metadata)
 
             self._update(production_id, "acquiring_visuals", metadata)
-            asset_manager = self.asset_manager or LicensedLocalAssetManager()
-            visuals = asset_manager.acquire(script.scenes, output_dir / "assets" / "visuals")
+            visuals = self._acquire_visuals(
+                script.scenes, output_dir / "assets" / "visuals"
+            )
             metadata["visual_assets"] = visuals
             self._update(production_id, "acquiring_visuals", metadata)
 
@@ -218,6 +229,21 @@ class ProductionService:
             error=error,
             database_path=self.database_path,
         )
+
+    def _acquire_visuals(
+        self, scenes, destination: str | Path
+    ) -> list[dict[str, Any]]:
+        if get_image_provider_name() == "pollinations":
+            try:
+                generate_scene_images(
+                    scenes,
+                    library_path=get_licensed_asset_path(),
+                    provider=build_image_provider(),
+                )
+            except ImageGenerationError as error:
+                raise VisualAssetError(str(error)) from error
+        asset_manager = self.asset_manager or LicensedLocalAssetManager()
+        return asset_manager.acquire(scenes, destination)
 
     @staticmethod
     def _write_metadata(

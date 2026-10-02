@@ -58,12 +58,27 @@ class LicensedLocalAssetManager:
             if source.parent != library:
                 raise VisualAssetError("Scene asset path escapes the configured licensed library.")
             provenance = manifest.get(source.name)
-            if not isinstance(provenance, dict) or not all(
+            has_source_and_license = isinstance(provenance, dict) and all(
                 isinstance(provenance.get(field), str) and provenance[field].strip()
-                for field in ("source", "license", "rights_holder")
-            ):
+                for field in ("source", "license")
+            )
+            is_pollinations = (
+                has_source_and_license
+                and provenance.get("source") == "Pollinations AI (generated)"
+                and all(
+                    isinstance(provenance.get(field), str) and provenance[field].strip()
+                    for field in ("author", "url", "model", "prompt", "generated_at")
+                )
+            )
+            has_manual_rights_holder = (
+                has_source_and_license
+                and isinstance(provenance.get("rights_holder"), str)
+                and bool(provenance["rights_holder"].strip())
+            )
+            if not (is_pollinations or has_manual_rights_holder):
                 raise VisualAssetError(
-                    f"Asset {source.name} needs source, license, and rights_holder metadata in LICENSES.json."
+                    f"Asset {source.name} needs source, license, and rights_holder metadata, "
+                    "or complete Pollinations provenance, in LICENSES.json."
                 )
             try:
                 with Image.open(source) as image:
@@ -86,7 +101,7 @@ class LicensedLocalAssetManager:
                     "visual_description": scene.visual_description,
                     "source": provenance["source"],
                     "license": provenance["license"],
-                    "rights_holder": provenance["rights_holder"],
+                    "rights_holder": provenance.get("rights_holder", provenance.get("author", "")),
                     "attribution": provenance.get("attribution", ""),
                     "width": width,
                     "height": height,

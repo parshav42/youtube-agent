@@ -279,6 +279,7 @@ def test_tts_provider_refuses_existing_output_without_calling_service(
 
 def test_production_failure_persists_audio_and_resume_renders_playable_mp4(tmp_path, monkeypatch) -> None:
     database_path = tmp_path / "production.sqlite3"
+    monkeypatch.setenv("IMAGE_PROVIDER", "manual")
     monkeypatch.setenv("MOTIVATIONOS_ADMIN_TOKEN", "temporary-review-token")
     monkeypatch.setenv("MOTIVATIONOS_SCHEDULER_ENABLED", "false")
     script = MockScriptGenerator().generate(ScriptRequest(topic="discipline"))
