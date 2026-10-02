@@ -4,7 +4,9 @@ MotivationOS builds original Hindi-English motivational Shorts. Day 1 research a
 
 ## LLM providers
 
-Sarvam is the default backend, using `sarvam-105b` for chat completions. Set `LLM_PROVIDER=sarvam` and `SARVAM_API_KEY` in your ignored local `.env`; `SARVAM_BASE_URL` defaults to `https://api.sarvam.ai/v1` and `SARVAM_MODEL_NAME` to `sarvam-105b`. Get an API key from the Sarvam AI developer console. The provider supports structured JSON generation used by script writing, scene planning, revision, and quality review.
+DeepSeek is the default backend in `.env.example`, using `deepseek-v4-pro` for OpenAI-compatible chat completions. Set `LLM_PROVIDER=deepseek`, `DEEPSEEK_API_KEY`, and optionally `DEEPSEEK_MODEL` in your ignored local `.env`. The provider supports structured JSON generation used by script writing, scene planning, revision, and quality review.
+
+Sarvam remains available as an optional backend: set `LLM_PROVIDER=sarvam` and `SARVAM_API_KEY`; `SARVAM_BASE_URL` defaults to `https://api.sarvam.ai/v1` and `SARVAM_MODEL_NAME` to `sarvam-105b`.
 
 To use Hugging Face instead, set `LLM_PROVIDER=huggingface`, then configure `HF_TOKEN`, `HF_MODEL`, and optionally `HF_PROVIDER`. HF timeout and retry settings continue to apply to that provider only. Copy the provider settings from `.env.example`; never commit `.env`.
 

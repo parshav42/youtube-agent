@@ -52,7 +52,10 @@ def run_daily_pipeline(database_path: str | Path | None = None) -> dict[str, Any
             raise DailyPipelineError("script generation", str(error)) from error
         record = state.get("script_record")
         if not record:
-            raise DailyPipelineError("script generation", "Draft flow did not save a script record.")
+            details = "; ".join(str(item) for item in state.get("errors", []))
+            limitation = state.get("provider_limitation")
+            reason = details or str(limitation) or "Draft flow did not save a script record."
+            raise DailyPipelineError("script generation", reason)
         score100 = float(record.get("quality_score", -1)) * 10
         evaluation_passed = bool((record.get("evaluation") or {}).get("passed"))
         if score100 > float(settings["min_script_quality_score"]) and evaluation_passed:

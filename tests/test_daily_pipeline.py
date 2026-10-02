@@ -61,12 +61,19 @@ def _pipeline_fakes(monkeypatch, tmp_path, *, auto_scripts=True, auto_production
         **script_records[i-1], "reviewed_at": "2026-01-01T00:00:00+00:00", "reviewed_by": "auto_pipeline"})
     metadata = {"audio_qa": {"technical_status": qa, "quality_score": 9},
                 "video_qa": {"technical_status": "passed", "quality_score": 9},
-                "video": {"path": str(video)}, "youtube_metadata": {"title": "Test title"}}
+                "video": {"path": str(video)}, "youtube_metadata": {
+                    "title": "Test title", "description": "Test description", "tags": ["focus"]}}
     production = {"id": "prod-1", "script_id": 1, "status": "ready_for_manual_upload",
                   "output_dir": str(output), "metadata": metadata, "error": None}
     monkeypatch.setattr(pipeline, "get_production_by_id", lambda *a: production)
     monkeypatch.setattr(pipeline, "update_production", lambda *a, **k: {**production, "status": "ready_for_manual_upload"})
-    monkeypatch.setattr(pipeline, "export_upload_package", lambda *a: (calls.update(package=calls["package"]+1) or tmp_path / "upload_package"))
+    import app.youtube.manual_upload as manual_upload
+    monkeypatch.setattr(manual_upload, "get_production_by_id", lambda *a: production)
+    actual_export = pipeline.export_upload_package
+    def tracked_export(*args):
+        calls["package"] += 1
+        return actual_export(*args)
+    monkeypatch.setattr(pipeline, "export_upload_package", tracked_export)
     return calls, script
 
 
@@ -105,6 +112,10 @@ def test_full_pipeline_happy_path_exports_package(monkeypatch, tmp_path) -> None
     assert result["package_path"].endswith("upload_package")
     assert result["production_id"] == "prod-1"
     assert calls["package"] == 1
+    package = Path(result["package_path"])
+    assert {"final.mp4", "title.txt", "description.txt", "tags.txt", "README.txt"} <= {
+        item.name for item in package.iterdir()
+    }
 
 
 def test_low_score_retries_with_fresh_topic_then_succeeds(monkeypatch, tmp_path) -> None:

@@ -252,12 +252,17 @@ def get_hf_settings() -> dict[str, str]:
     }
 
 
-def get_llm_provider() -> str:
+def get_llm_provider_name() -> str:
     """Return the configured LLM backend, defaulting to Sarvam."""
     provider = os.getenv("LLM_PROVIDER", "sarvam").strip().lower()
-    if provider not in {"huggingface", "sarvam"}:
-        raise ValueError("LLM_PROVIDER must be 'huggingface' or 'sarvam'.")
+    if provider not in {"huggingface", "sarvam", "deepseek", "groq"}:
+        raise ValueError("LLM_PROVIDER must be 'huggingface', 'sarvam', 'deepseek', or 'groq'.")
     return provider
+
+
+def get_llm_provider() -> str:
+    """Backward-compatible name for the configured LLM backend."""
+    return get_llm_provider_name()
 
 
 def get_sarvam_settings() -> dict[str, str]:
@@ -267,3 +272,23 @@ def get_sarvam_settings() -> dict[str, str]:
         "base_url": os.getenv("SARVAM_BASE_URL", "https://api.sarvam.ai/v1").strip(),
         "model": os.getenv("SARVAM_MODEL_NAME", "sarvam-105b").strip(),
     }
+
+
+def get_deepseek_api_key() -> str:
+    """Return the configured DeepSeek key without logging or exposing it."""
+    return os.getenv("DEEPSEEK_API_KEY", "").strip()
+
+
+def get_deepseek_model() -> str:
+    """Return the selected DeepSeek chat model."""
+    return os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro").strip()
+
+
+def get_groq_api_key() -> str:
+    """Return the configured Groq key without logging or exposing it."""
+    return os.getenv("GROQ_API_KEY", "").strip()
+
+
+def get_groq_model() -> str:
+    """Return the selected Groq chat model."""
+    return os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
