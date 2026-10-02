@@ -198,7 +198,7 @@ python -m app.main --topic "Consistency during exam season" --duration 35
 
 Every generated script is saved as `needs_review`, even when its automated quality evaluation passes. A passing evaluation makes it eligible for human review; it is not approval. The `--draft-for-review` flag remains as a deprecated compatibility option.
 
-`MIN_SCRIPT_QUALITY_SCORE` sets the quality threshold used for script evaluation (default `7.5`); the same setting is used by the publishing quality gate. The legacy `MOTIVATIONOS_QUALITY_THRESHOLD` remains a fallback when `MIN_SCRIPT_QUALITY_SCORE` is unset. Lowering the threshold does not bypass any of the eleven required evaluation checks.
+`MIN_SCRIPT_QUALITY_SCORE` sets the script quality threshold on a 0–100 scale (default `75`) for evaluation and publishing. It is the only setting used for this threshold. Lowering it does not bypass any of the eleven required evaluation checks.
 
 ### Fully automated pipeline
 
@@ -208,7 +208,7 @@ Every generated script is saved as `needs_review`, even when its automated quali
 .venv/bin/python -m app.main --run-daily-pipeline
 ```
 
-`AUTO_APPROVE_SCRIPTS` and `AUTO_APPROVE_PRODUCTIONS` default to `true`; set either to `false` to stop at that manual review gate. `MIN_SCRIPT_QUALITY_SCORE` uses a 0–100 scale for this command (default `75`; existing 0–10 values are accepted for compatibility). A script must score strictly above the threshold. `DAILY_PIPELINE_MAX_SCRIPT_RETRIES` defaults to `3` retries after the first draft. `DAILY_PIPELINE_NICHE` optionally overrides the selected topic. Approval stops if QA, recorded video hash, or any scene's `LICENSES.json` source/license/rights-holder provenance is missing.
+`AUTO_APPROVE_SCRIPTS` and `AUTO_APPROVE_PRODUCTIONS` default to `true`; set either to `false` to stop at that manual review gate. `MIN_SCRIPT_QUALITY_SCORE` uses a 0–100 scale for every script-quality gate (default `75`). Legacy stored script scores on a 0–10 scale are normalized to 0–100 when read. A script must score strictly above the threshold. `DAILY_PIPELINE_MAX_SCRIPT_RETRIES` defaults to `3` retries after the first draft. `DAILY_PIPELINE_NICHE` optionally overrides the selected topic. Approval stops if QA, recorded video hash, or any scene's `LICENSES.json` source/license/rights-holder provenance is missing.
 
 To schedule the pipeline, set `DAILY_PIPELINE_CRON` to a five-field UTC cron expression, for example `0 8 * * *`, and start the API scheduler with `MOTIVATIONOS_SCHEDULER_ENABLED=true`. Each scheduled run logs its timestamp and outcome. The dashboard at `/production-review` also has a **Run daily pipeline** action with polled progress.
 

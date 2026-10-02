@@ -5,6 +5,13 @@ import re
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
+def normalize_legacy_script_score(value: object) -> object:
+    """Convert historical script scores from 0..10 to the canonical 0..100 scale."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 10:
+        return value * 10
+    return value
+
+
 class ScriptRequest(BaseModel):
     """Requested subject, narration language, and short-form duration."""
 
@@ -79,7 +86,7 @@ class ScriptDraft(BaseModel):
     closing_message: str = Field(min_length=1)
     description: str = Field(min_length=1)
     hashtags: list[str] = Field(min_length=1)
-    quality_score: float = Field(default=0, ge=0, le=10)
+    quality_score: float = Field(default=0, ge=0, le=100)
     revision_notes: list[str] = Field(default_factory=list)
 
     @field_validator("topic", "language", "opening_hook", "closing_message", "description", mode="before")
@@ -95,6 +102,11 @@ class ScriptDraft(BaseModel):
         if not isinstance(value, str) or not value.strip():
             raise ValueError("Narration must contain non-whitespace text.")
         return value
+
+    @field_validator("quality_score", mode="before")
+    @classmethod
+    def normalize_legacy_quality_score(cls, value: object) -> object:
+        return normalize_legacy_script_score(value)
 
     @field_validator("title_candidates", "hashtags", "story_beats", mode="before")
     @classmethod
@@ -118,7 +130,7 @@ class MotivationalScript(BaseModel):
     closing_message: str = Field(min_length=1)
     description: str = Field(min_length=1)
     hashtags: list[str] = Field(min_length=1)
-    quality_score: float = Field(ge=0, le=10)
+    quality_score: float = Field(ge=0, le=100)
     revision_notes: list[str] = Field(default_factory=list)
 
     @field_validator("topic", "language", "opening_hook", "closing_message", "description", mode="before")
@@ -134,6 +146,11 @@ class MotivationalScript(BaseModel):
         if not isinstance(value, str) or not value.strip():
             raise ValueError("Narration must contain non-whitespace text.")
         return value
+
+    @field_validator("quality_score", mode="before")
+    @classmethod
+    def normalize_legacy_quality_score(cls, value: object) -> object:
+        return normalize_legacy_script_score(value)
 
     @field_validator("title_candidates", "hashtags", "story_beats", "revision_notes", mode="before")
     @classmethod
@@ -177,8 +194,8 @@ class ScriptEvaluation(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    quality_score: float = Field(ge=0, le=10)
-    threshold: float = Field(ge=0, le=10)
+    quality_score: float = Field(ge=0, le=100)
+    threshold: float = Field(ge=0, le=100)
     passed: bool
     language_consistency: bool
     story_coherence: bool
@@ -192,6 +209,11 @@ class ScriptEvaluation(BaseModel):
     unsupported_factual_assertions: bool
     unsupported_guarantees: bool
     feedback: list[str] = Field(default_factory=list)
+
+    @field_validator("quality_score", "threshold", mode="before")
+    @classmethod
+    def normalize_legacy_score_fields(cls, value: object) -> object:
+        return normalize_legacy_script_score(value)
 
     @model_validator(mode="after")
     def validate_decision_consistency(self) -> "ScriptEvaluation":

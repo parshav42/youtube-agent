@@ -1,0 +1,78 @@
+{
+  "topic": "Discipline and consistency: fresh angle 2",
+  "language": "Hinglish",
+  "target_duration_seconds": 35,
+  "title_candidates": [
+    "Subah ki Discipline",
+    "Rohan ki Choti Jeet",
+    "Consistency Ka Magic"
+  ],
+  "opening_hook": "Kya aap bhi alarm ko ignore karte ho? Dekhiye Rohan ki kahani!",
+  "narration": "Rohan ek chhota sa clerk tha jo har roz alarm ko snooze karta tha. Ek subah, usne socha ki bas aaj se discipline ki practice shuru karega. Usne apna alarm 5 baje set kiya aur pehle din sirf 5 minute walk ki. Roz ki thakan aur kaam ki pressure usko distract karne ki koshish ki, par Rohan ne apni routine ko todne nahi diya. Ek hafte baad, uski productivity double ho gayi aur uska manager uski punctuality ki tareef karne laga. Yeh choti jeet usko yaad dilati hai ki consistency se bade goals bhi achievable hote hain. Ab Rohan har din ek choti jeet celebrate karta hai, aur aap bhi kar sakte ho.",
+  "story_beats": [
+    "Hook: Rohan, a clerk, habitually snoozes his alarm, missing the start of his day.",
+    "Problem: He realizes his lack of discipline is hurting his productivity and career.",
+    "Conflict: Despite setting an early alarm and a small walk, fatigue and work pressure tempt him to quit.",
+    "Turning point: After a week of sticking to the routine, his productivity doubles and his manager praises his punctuality.",
+    "Resolution: The small victory reinforces Rohan’s belief that consistency yields big results, and he begins celebrating daily wins.",
+    "Closing message: Discipline is built from tiny steps—start today!"
+  ],
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration_seconds": 7,
+      "narration": "Rohan ek chhota sa clerk tha jo har roz alarm ko snooze karta tha. Ek subah, usne socha ki bas aaj se discipline ki practice shuru karega. ",
+      "visual_description": "Vertical 9:16, Rohan ek chhote se bedroom mein bistar par lete hue, alarm clock ki screen par blinking snooze button dikh raha hai; uska haath button par hover karta hai aur phir wo ek determined expression ke saath uthta hai.",
+      "caption": "Rohan alarm ko snooze karta hai aur discipline shuru karne ka faisla karta hai",
+      "transition": "fade",
+      "audio_direction": "soft alarm beep, sleepy breathing, followed by a subtle rising tone indicating resolve"
+    },
+    {
+      "scene_number": 2,
+      "duration_seconds": 7,
+      "narration": "Usne apna alarm 5 baje set kiya aur pehle din sirf 5 minute walk ki. ",
+      "visual_description": "Vertical 9:16, Rohan phone par alarm 5:00 AM set karta hai, sunrise ki soft roshni se room roshan hota hai; wo shoes pehankar, ek chhoti si park ki taraf nikalta hai, camera uski brisk 5‑minute walk ko track karta hai.",
+      "caption": "Rohan 5 baje alarm set karta hai aur 5‑minute walk shuru karta hai",
+      "transition": "cut",
+      "audio_direction": "phone click, morning birds chirping, gentle footsteps on pavement"
+    },
+    {
+      "scene_number": 3,
+      "duration_seconds": 7,
+      "narration": "Roz ki thakan aur kaam ki pressure usko distract karne ki koshish ki, par Rohan ne apni routine ko todne nahi diya. ",
+      "visual_description": "Vertical 9:16, Rohan desk par thaka hua lekin focused dikhta hai; cluttered papers, computer screen par notification pop-ups aate hain, lekin wo habit tracker app ko check karke routine continue karta hai.",
+      "caption": "Thakan aur pressure aata hai, par Rohan apni routine nahi todta",
+      "transition": "wipe left",
+      "audio_direction": "office ambient hum, subtle tension strings, steady metronome beat representing routine"
+    },
+    {
+      "scene_number": 4,
+      "duration_seconds": 7,
+      "narration": "Ek hafte baad, uski productivity double ho gayi aur uska manager uski punctuality ki tareef karne laga. Yeh choti jeet usko yaad dilati hai ki consistency se bade goals bhi achievable hote hain. ",
+      "visual_description": "Vertical 9:16, Manager desk ke paas aata hai, ek chart dikhata hai jisme productivity 2x dikh rahi hai; wo Rohan ke shoulder par haath rakhkar shabashi deta hai, dono muskuraate hain.",
+      "caption": "Manager Rohan ki punctuality ki tareef karta hai, productivity double ho gayi",
+      "transition": "zoom in",
+      "audio_direction": "positive chime, light applause, soft upbeat background music"
+    },
+    {
+      "scene_number": 5,
+      "duration_seconds": 7,
+      "narration": "Ab Rohan har din ek choti jeet celebrate karta hai, aur aap bhi kar sakte ho.",
+      "visual_description": "Vertical 9:16, Rohan khushi se smile karta hai, thumbs up deta hai, screen par animated confetti aur \"Celebrate Small Wins\" text flash hota hai; camera zoom out hota hai.",
+      "caption": "Rohan har din choti jeet celebrate karta hai, aap bhi kar sakte hain",
+      "transition": "fade out",
+      "audio_direction": "uplifting music crescendo, gentle whoosh effect"
+    }
+  ],
+  "closing_message": "Discipline choti choti steps se banti hai, aaj se shuru karo!",
+  "description": "A short motivational YouTube Shorts story about Rohan discovering the power of daily discipline and celebrating small wins.",
+  "hashtags": [
+    "#Discipline",
+    "#Consistency",
+    "#Motivation"
+  ],
+  "quality_score": 72.73,
+  "revision_notes": [
+    "Revision 2: No valid script is available to evaluate."
+  ]
+}

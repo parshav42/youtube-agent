@@ -11,7 +11,11 @@ from typing import Any, Iterator
 from pydantic import BaseModel, ValidationError
 
 from app.config import get_database_path
-from app.schemas.script_schema import MotivationalScript, ScriptEvaluation
+from app.schemas.script_schema import (
+    MotivationalScript,
+    ScriptEvaluation,
+    normalize_legacy_script_score,
+)
 
 ResearchResult = BaseModel | Mapping[str, Any]
 
@@ -87,7 +91,9 @@ def initialize_database(database_path: str | Path | None = None) -> None:
                 created_at TEXT NOT NULL,
                 evaluation_json TEXT,
                 reviewed_at TEXT,
-                reviewed_by TEXT
+                reviewed_by TEXT,
+                rejection_reason TEXT,
+                rejection_stage TEXT
             )
             """
         )
@@ -101,6 +107,10 @@ def initialize_database(database_path: str | Path | None = None) -> None:
 
         if "reviewed_by" not in script_columns:
             connection.execute("ALTER TABLE scripts ADD COLUMN reviewed_by TEXT")
+        if "rejection_reason" not in script_columns:
+            connection.execute("ALTER TABLE scripts ADD COLUMN rejection_reason TEXT")
+        if "rejection_stage" not in script_columns:
+            connection.execute("ALTER TABLE scripts ADD COLUMN rejection_stage TEXT")
 
 
 def _serialize_result(result: ResearchResult) -> dict[str, Any]:
@@ -191,17 +201,33 @@ def _decode_script(row: sqlite3.Row | None) -> dict[str, Any] | None:
     """Decode a script row into its public record shape."""
     if row is None:
         return None
+    script_data = json.loads(row["script_json"])
+    if isinstance(script_data, dict) and "quality_score" in script_data:
+        script_data["quality_score"] = normalize_legacy_script_score(
+            script_data["quality_score"]
+        )
+    evaluation_data = (
+        json.loads(row["evaluation_json"]) if row["evaluation_json"] else None
+    )
+    if isinstance(evaluation_data, dict):
+        for field in ("quality_score", "threshold"):
+            if field in evaluation_data:
+                evaluation_data[field] = normalize_legacy_script_score(
+                    evaluation_data[field]
+                )
     return {
         "id": row["id"],
         "topic": row["topic"],
         "language": row["language"],
-        "script": json.loads(row["script_json"]),
-        "quality_score": row["quality_score"],
-        "evaluation": json.loads(row["evaluation_json"]) if row["evaluation_json"] else None,
+        "script": script_data,
+        "quality_score": normalize_legacy_script_score(row["quality_score"]),
+        "evaluation": evaluation_data,
         "status": row["status"],
         "created_at": row["created_at"],
         "reviewed_at": row["reviewed_at"],
         "reviewed_by": row["reviewed_by"],
+        "rejection_reason": row["rejection_reason"],
+        "rejection_stage": row["rejection_stage"],
     }
 
 
@@ -213,7 +239,8 @@ def save_script(
 ) -> dict[str, Any]:
     """Persist a validated script and optional structured evaluation report."""
     data = _serialize_result(script)
-    MotivationalScript.model_validate(data)
+    validated_script = MotivationalScript.model_validate(data)
+    data["quality_score"] = validated_script.quality_score
     topic = data.get("topic")
     language = data.get("language")
     quality_score = data.get("quality_score")
@@ -228,9 +255,16 @@ def save_script(
     initialize_database(database_path)
     created_at = datetime.now(timezone.utc).isoformat()
     script_json = json.dumps(data, ensure_ascii=False)
+    evaluation_data = _serialize_result(evaluation) if evaluation is not None else None
+    if isinstance(evaluation_data, dict):
+        for field in ("quality_score", "threshold"):
+            if field in evaluation_data:
+                evaluation_data[field] = normalize_legacy_script_score(
+                    evaluation_data[field]
+                )
     evaluation_json = (
-        json.dumps(_serialize_result(evaluation), ensure_ascii=False)
-        if evaluation is not None
+        json.dumps(evaluation_data, ensure_ascii=False)
+        if evaluation_data is not None
         else None
     )
     with _connection(database_path) as connection:
@@ -247,7 +281,7 @@ def save_script(
         )
         row = connection.execute(
             """
-            SELECT id, topic, language, script_json, quality_score, status, created_at, evaluation_json, reviewed_at, reviewed_by
+            SELECT id, topic, language, script_json, quality_score, status, created_at, evaluation_json, reviewed_at, reviewed_by, rejection_reason, rejection_stage
             FROM scripts WHERE id = ?
             """,
             (cursor.lastrowid,),
@@ -266,7 +300,7 @@ def get_script_by_id(
     with _connection(database_path) as connection:
         row = connection.execute(
             """
-            SELECT id, topic, language, script_json, quality_score, status, created_at, evaluation_json, reviewed_at, reviewed_by
+            SELECT id, topic, language, script_json, quality_score, status, created_at, evaluation_json, reviewed_at, reviewed_by, rejection_reason, rejection_stage
             FROM scripts WHERE id = ?
             """,
             (script_id,),
@@ -284,7 +318,7 @@ def get_recent_scripts(
     with _connection(database_path) as connection:
         rows = connection.execute(
             """
-            SELECT id, topic, language, script_json, quality_score, status, created_at, evaluation_json, reviewed_at, reviewed_by
+            SELECT id, topic, language, script_json, quality_score, status, created_at, evaluation_json, reviewed_at, reviewed_by, rejection_reason, rejection_stage
             FROM scripts ORDER BY created_at DESC, id DESC LIMIT ?
             """,
             (limit,),
@@ -302,7 +336,7 @@ def get_scripts_needing_review(
     with _connection(database_path) as connection:
         rows = connection.execute(
             """SELECT id, topic, language, script_json, quality_score, status,
-                created_at, evaluation_json, reviewed_at, reviewed_by
+                created_at, evaluation_json, reviewed_at, reviewed_by, rejection_reason, rejection_stage
             FROM scripts
             WHERE status = 'needs_review'
                 OR (status = 'completed' AND reviewed_at IS NULL AND reviewed_by IS NULL)
@@ -396,6 +430,38 @@ def delete_unreviewed_script(script_id: int, database_path: str | Path | None = 
         )
         if cursor.rowcount != 1:
             raise ScriptReviewError("Only an unreviewed draft can be removed after exhausted pipeline retries.")
+
+
+def reject_script(script_id: int, reason: str, stage: str = "quality_gate",
+                  database_path: str | Path | None = None) -> dict[str, Any]:
+    """Preserve a failed draft and record the pipeline rejection diagnostic."""
+    initialize_database(database_path)
+    with _connection(database_path) as connection:
+        cursor = connection.execute(
+            "UPDATE scripts SET status = 'rejected', rejection_reason = ?, rejection_stage = ? "
+            "WHERE id = ? AND status = 'needs_review' AND reviewed_at IS NULL AND reviewed_by IS NULL",
+            (reason, stage, script_id),
+        )
+        if cursor.rowcount != 1:
+            raise ScriptReviewError(f"Unable to mark unreviewed script {script_id} rejected.")
+    record = get_script_by_id(script_id, database_path)
+    if record is None:
+        raise RuntimeError("The rejected script could not be read back.")
+    return record
+
+
+def get_rejected_scripts(database_path: str | Path | None = None, limit: int = 10) -> list[dict[str, Any]]:
+    """Return rejected scripts newest first."""
+    if limit < 1:
+        raise ValueError("limit must be at least 1.")
+    initialize_database(database_path)
+    with _connection(database_path) as connection:
+        rows = connection.execute(
+            "SELECT id, topic, language, script_json, quality_score, status, created_at, "
+            "evaluation_json, reviewed_at, reviewed_by, rejection_reason, rejection_stage "
+            "FROM scripts WHERE status = 'rejected' ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [record for row in rows if (record := _decode_script(row)) is not None]
 
 
 

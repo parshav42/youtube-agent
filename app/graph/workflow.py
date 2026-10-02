@@ -82,8 +82,8 @@ def build_workflow(
     generator = script_generator
     active_llm_provider = llm_provider
     threshold = get_quality_threshold() if quality_threshold is None else quality_threshold
-    if not 0 <= threshold <= 10:
-        raise ValueError("Quality threshold must be between 0 and 10.")
+    if not 0 <= threshold <= 100:
+        raise ValueError("Quality threshold must be between 0 and 100.")
     speaking_rate = get_speaking_rate_wps() if speaking_rate_wps is None else speaking_rate_wps
     if not 1 <= speaking_rate <= 5:
         raise ValueError("Speaking rate must be between 1 and 5 words per second.")

@@ -96,4 +96,7 @@ def test_script_evaluation_breakdown_is_saved_and_old_rows_migrate(tmp_path) -> 
         evaluation=evaluation,
     )
 
-    assert new_record["evaluation"] == evaluation
+    assert new_record["evaluation"] == {
+        **evaluation,
+        "quality_score": 37.5,
+    }

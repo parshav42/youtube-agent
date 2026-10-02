@@ -45,7 +45,7 @@ def gate_records(tmp_path):
     )
     script = {
         "script": {"topic": "Gate fixture"},
-        "quality_score": 9.0,
+        "quality_score": 90.0,
         "evaluation": {"passed": True, **dict.fromkeys(checks, True)},
     }
     production = {
@@ -74,7 +74,7 @@ def _evaluate(library, script, production):
         script,
         production,
         licensed_asset_directory=library,
-        min_script_quality_score=8.0,
+        min_script_quality_score=80.0,
         min_audio_quality_score=8.0,
         min_video_quality_score=8.0,
     )
@@ -104,7 +104,7 @@ def test_all_approval_gates_pass_and_record_video_hash(gate_records):
 def test_any_failed_gate_blocks_auto_approval(gate_records, change, expected_reason):
     library, script, production, _ = gate_records
     if change == "script_score":
-        script["quality_score"] = 7.9
+        script["quality_score"] = 79.0
     elif change == "policy":
         script["evaluation"]["unsupported_guarantees"] = False
     elif change == "audio":
@@ -138,8 +138,8 @@ def _gate_inputs(tmp_path):
     provenance = {"source": "creator record", "license": "CC BY 4.0", "rights_holder": "Creator"}
     (library / "LICENSES.json").write_text(json.dumps({asset_path.name: provenance}), encoding="utf-8")
     checks = {
-        "quality_score": 9.5,
-        "threshold": 8.0,
+        "quality_score": 95.0,
+        "threshold": 80.0,
         "passed": True,
         "language_consistency": True,
         "story_coherence": True,
@@ -165,7 +165,7 @@ def _gate_inputs(tmp_path):
     }
     production = {"metadata": production_metadata}
     settings = {
-        "min_script_quality_score": 8.0,
+        "min_script_quality_score": 80.0,
         "min_audio_quality_score": 8.0,
         "min_video_quality_score": 8.0,
     }

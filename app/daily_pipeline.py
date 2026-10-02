@@ -11,7 +11,7 @@ from app.config import (
     get_quality_threshold, get_topic,
 )
 from app.database.db import (
-    delete_unreviewed_script, get_production_by_id,
+    reject_script, get_production_by_id,
     review_script, update_production,
 )
 from app.graph.workflow import build_workflow
@@ -56,14 +56,16 @@ def run_daily_pipeline(database_path: str | Path | None = None) -> dict[str, Any
             limitation = state.get("provider_limitation")
             reason = details or str(limitation) or "Draft flow did not save a script record."
             raise DailyPipelineError("script generation", reason)
-        score100 = float(record.get("quality_score", -1)) * 10
+        score100 = float(record.get("quality_score", -1))
         evaluation_passed = bool((record.get("evaluation") or {}).get("passed"))
         if score100 > float(settings["min_script_quality_score"]) and evaluation_passed:
             break
-        logger.warning("Daily pipeline script rejected id=%s score=%s evaluation_passed=%s attempt=%s", record["id"], score100, evaluation_passed, attempt + 1)
-        _discard_failed_draft(record["id"], state.get("script_json_path"), db_path)
+        reason = _rejection_reason(record, settings["min_script_quality_score"])
+        reject_script(int(record["id"]), reason, "quality_gate", db_path)
+        logger.warning("Daily pipeline script rejected id=%s score=%s evaluation_passed=%s attempt=%s reason=%s", record["id"], score100, evaluation_passed, attempt + 1, reason)
         record = None
     if record is None:
+        logger.error("All daily pipeline script attempts rejected. Inspect with: SELECT id, quality_score, rejection_reason FROM scripts WHERE status='rejected' ORDER BY id DESC")
         raise DailyPipelineError("script quality", f"All {int(settings['max_script_retries']) + 1} script attempts failed strict quality threshold (> {settings['min_script_quality_score']}).")
     script_id = int(record["id"])
     if not settings["auto_approve_scripts"]:
@@ -158,11 +160,20 @@ def _validate_provenance(library: Path, script: dict[str, Any]) -> str | None:
     return None
 
 
-def _discard_failed_draft(script_id: int, json_path: str | None, database_path: Path) -> None:
-    """Keep exhausted low-quality attempts from leaving persisted partial drafts."""
-    delete_unreviewed_script(int(script_id), database_path)
-    if json_path:
-        Path(json_path).unlink(missing_ok=True)
+def _rejection_reason(record: dict[str, Any], minimum_score: float) -> str:
+    evaluation = record.get("evaluation") or {}
+    checks = [name for name, passed in evaluation.items()
+              if name not in {"passed", "feedback", "quality_score", "threshold"}
+              and passed is False]
+    if float(record.get("quality_score", -1)) <= float(minimum_score):
+        checks.append("minimum_quality_score")
+    if not evaluation.get("passed") and not checks:
+        checks.append("evaluation_passed")
+    feedback = evaluation.get("feedback")
+    detail = f"Failing checks: {', '.join(checks) or 'evaluation_passed'}"
+    if feedback:
+        detail += f"; feedback: {feedback}"
+    return detail
 
 
 def _write_metadata(output_dir: Path, production_id: str, metadata: dict[str, Any]) -> None:

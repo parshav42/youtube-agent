@@ -3,7 +3,11 @@
 import json
 from pathlib import Path
 
-from app.agents.script_agent import MockScriptGenerator, build_script_generator
+from app.agents.script_agent import (
+    MockScriptGenerator,
+    build_script_generator,
+    split_narration_for_scenes,
+)
 from app.database.db import get_recent_scripts, get_script_by_id, save_research
 from app.graph.workflow import MAX_REVISION_ATTEMPTS, build_workflow
 from app.providers.huggingface_llm import HuggingFaceConfigurationError
@@ -88,6 +92,39 @@ def test_revision_recovers_after_first_quality_failure(tmp_path) -> None:
     assert result["revision_attempts"] == 1
     assert result["evaluation"].passed
     assert any("Revision 1" in note for note in result["script"].revision_notes)
+
+
+def test_revision_regenerates_scripts_outside_narration_word_range(tmp_path) -> None:
+    class ShortFirstScriptGenerator(MockScriptGenerator):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate(self, request: ScriptRequest, feedback: str = "") -> MotivationalScript:
+            self.calls += 1
+            script = super().generate(request, feedback)
+            if self.calls > 1:
+                return script
+            narration = " ".join(script.narration.split()[:50])
+            segments = split_narration_for_scenes(narration, len(script.scenes))
+            scenes = [
+                scene.model_copy(update={"narration": segment})
+                for scene, segment in zip(script.scenes, segments, strict=True)
+            ]
+            return script.model_copy(
+                update={"narration": narration, "scenes": scenes}
+            )
+
+    generator = ShortFirstScriptGenerator()
+    workflow = build_workflow(
+        database_path=str(tmp_path / "short-narration.sqlite3"),
+        script_generator=generator,
+    )
+
+    result = workflow.invoke({"script_request": {"topic": "consistency"}})
+
+    assert generator.calls == 2
+    assert result["revision_attempts"] == 1
+    assert result["evaluation"].passed
 
 
 def test_revision_attempts_are_bounded_and_failed_script_is_marked_for_review(tmp_path) -> None:

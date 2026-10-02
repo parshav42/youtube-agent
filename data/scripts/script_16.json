@@ -1,0 +1,76 @@
+{
+  "topic": "Discipline and consistency",
+  "language": "Hinglish",
+  "target_duration_seconds": 35,
+  "title_candidates": [
+    "Rohan ki Discipline Journey",
+    "Roz ka Routine, Badi Jeet",
+    "Small Steps, Big Wins"
+  ],
+  "opening_hook": "Discipline ka chota raaz, Rohan ki kahani!",
+  "narration": "Rohan ne ek din decide kiya ki woh roz subah 5 baje alarm bajne par phone uthakar ek short meditation karega. Aaj se uska routine set ho gaya: 5 minute timer, focus on breathing, phir ek page likhega apne goal ke baare mein. Pehle din usko lag raha tha ki sab mushkil hai, lekin usne ek choti win dekhi jab uska coffee ka cup perfectly balanced raha. Har roz jab woh uss routine ko repeat karta, uska confidence badhta gaya. Kal jab usko ek important presentation deni thi, uski preparation flawless thi aur usne sabko impress kiya. Discipline ne Rohan ko dikhaya ki choti consistency se badi success milti hai. Remember, small steps lead to big change.",
+  "story_beats": [
+    "Hook: Rohan decides to start a 5 am morning meditation and goal‑writing routine.",
+    "Problem: The first session feels overwhelming and he doubts he can keep up.",
+    "Conflict: He struggles with the habit, noticing small setbacks like a wobbly coffee cup.",
+    "Turning point: A tiny win—his coffee cup stays perfectly balanced—boosts his confidence.",
+    "Resolution: Consistent practice sharpens his preparation, leading to a flawless presentation.",
+    "Closing message: Small consistency creates big victories—try it yourself!"
+  ],
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration_seconds": 7,
+      "narration": "Rohan ne ek din decide kiya ki woh roz subah 5 baje alarm bajne par phone uthakar ek short meditation karega. ",
+      "visual_description": "Vertical 9:16 frame shows a dimly lit bedroom at dawn, soft blue hue spilling across the walls. A digital clock glows 5:00 and a gentle chime rings. Rohan's hand reaches for the vibrating phone on the nightstand as the first light of sunrise filters through the curtains.",
+      "caption": "Rohan decides to start a daily 5 am short meditation by picking up his phone.",
+      "transition": "slow fade to black",
+      "audio_direction": "Morning ambience with a soft alarm chime, distant bird tweets, and the faint buzz of the phone."
+    },
+    {
+      "scene_number": 2,
+      "duration_seconds": 7,
+      "narration": "Aaj se uska routine set ho gaya: 5 minute timer, focus on breathing, phir ek page likhega apne goal ke baare mein. ",
+      "visual_description": "Vertical 9:16; Rohan sits cross‑legged on a textured rug, eyes closed, while his phone displays a bright 5‑minute countdown. A notebook lies open beside him, a pen poised to write his goal.",
+      "caption": "He sets a 5‑minute timer, breathes, then writes his goal.",
+      "transition": "sharp cut",
+      "audio_direction": "Soft inhalations and exhalations layered with a gentle ticking timer."
+    },
+    {
+      "scene_number": 3,
+      "duration_seconds": 7,
+      "narration": "Pehle din usko lag raha tha ki sab mushkil hai, lekin usne ek choti win dekhi jab uska coffee ka cup perfectly balanced raha. ",
+      "visual_description": "Vertical 9:16; Rohan writes in his notebook while a steaming coffee cup rests perfectly balanced on the edge of his desk, a thin wisp of steam spiraling upward.",
+      "caption": "He feels challenged but celebrates a small win as his coffee cup stays perfectly balanced.",
+      "transition": "left‑to‑right wipe",
+      "audio_direction": "Gentle pen scribble mixed with a soft clink when the cup settles."
+    },
+    {
+      "scene_number": 4,
+      "duration_seconds": 7,
+      "narration": "Har roz jab woh uss routine ko repeat karta, uska confidence badhta gaya. Kal jab usko ek important presentation deni thi, uski preparation flawless thi aur usne sabko impress kiya. ",
+      "visual_description": "Vertical 9:16; Rohan stands confidently at a sleek podium, illuminated slides behind him, while attentive audience members nod and smile as he gestures smoothly.",
+      "caption": "Daily practice boosts his confidence, leading to a flawless, impressive presentation.",
+      "transition": "gradual zoom in",
+      "audio_direction": "Light applause fades in with an uplifting piano motif."
+    },
+    {
+      "scene_number": 5,
+      "duration_seconds": 7,
+      "narration": "Discipline ne Rohan ko dikhaya ki choti consistency se badi success milti hai. Remember, small steps lead to big change.",
+      "visual_description": "Vertical 9:16; sunrise floods the room through a large window, casting golden light on Rohan as he smiles wide, arms raised in triumph, his silhouette outlined against the glow.",
+      "caption": "He realizes that consistent small steps bring big success.",
+      "transition": "slow fade out",
+      "audio_direction": "Building orchestral swell with soaring strings and a subtle chime."
+    }
+  ],
+  "closing_message": "Choti consistency, badi jeet – aap bhi try karo!",
+  "description": "A short motivational YouTube Shorts about discipline and consistency through Rohan's daily routine.",
+  "hashtags": [
+    "#Discipline",
+    "#Consistency",
+    "#Motivation"
+  ],
+  "quality_score": 81.82,
+  "revision_notes": []
+}

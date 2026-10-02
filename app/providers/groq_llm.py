@@ -93,7 +93,7 @@ class GroqProvider(HuggingFaceLLMProvider):
         """Generate a plain text completion."""
         text = self._request(
             system_prompt, user_prompt, json_mode=False,
-            max_tokens=min(max_tokens or get_groq_max_tokens(), get_groq_max_tokens()),
+            max_tokens=get_groq_max_tokens(),
         )
         if not text.strip():
             raise HuggingFaceInferenceError("Groq returned an empty completion.")
@@ -110,7 +110,7 @@ class GroqProvider(HuggingFaceLLMProvider):
         """Generate schema-validated JSON within the configured Groq token ceiling."""
         return super().generate_structured(
             response_model, system_prompt, user_prompt,
-            max_tokens=min(max_tokens or get_groq_max_tokens(), get_groq_max_tokens()),
+            max_tokens=get_groq_max_tokens(),
         )
 
     def _request(

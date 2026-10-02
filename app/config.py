@@ -39,15 +39,10 @@ def get_topic(override: str | None = None) -> str:
 
 def get_daily_pipeline_settings() -> dict[str, object]:
     """Read fail-closed settings for local daily pipeline approvals."""
-    raw_score = float(os.getenv("MIN_SCRIPT_QUALITY_SCORE", "75"))
-    # Existing script scoring is 0..10; daily pipeline policy is documented 0..100.
-    threshold = raw_score * 10 if raw_score <= 10 else raw_score
-    if not 0 <= threshold <= 100:
-        raise ValueError("MIN_SCRIPT_QUALITY_SCORE must be between 0 and 100.")
     return {
         "auto_approve_scripts": _get_bool("AUTO_APPROVE_SCRIPTS", True),
         "auto_approve_productions": _get_bool("AUTO_APPROVE_PRODUCTIONS", True),
-        "min_script_quality_score": threshold,
+        "min_script_quality_score": get_quality_threshold(),
         "max_script_retries": _get_int("DAILY_PIPELINE_MAX_SCRIPT_RETRIES", 3, 0, 10),
         "niche": os.getenv("DAILY_PIPELINE_NICHE", "").strip(),
         "cron": os.getenv("DAILY_PIPELINE_CRON", "").strip(),
@@ -55,18 +50,12 @@ def get_daily_pipeline_settings() -> dict[str, object]:
 
 
 def get_quality_threshold() -> float:
-    """Return the configured script quality threshold."""
-    value = os.getenv(
-        "MIN_SCRIPT_QUALITY_SCORE",
-        os.getenv("MOTIVATIONOS_QUALITY_THRESHOLD", "7.5"),
-    )
+    """Return MIN_SCRIPT_QUALITY_SCORE on the canonical 0..100 scale."""
     try:
-        threshold = float(value)
+        threshold = float(os.getenv("MIN_SCRIPT_QUALITY_SCORE", "75"))
     except ValueError as error:
-        raise ValueError("MIN_SCRIPT_QUALITY_SCORE must be a number from 0 to 10.") from error
-    if 10 < threshold <= 100:
-        threshold /= 10
-    if not 0 <= threshold <= 10:
+        raise ValueError("MIN_SCRIPT_QUALITY_SCORE must be a number from 0 to 100.") from error
+    if not 0 <= threshold <= 100:
         raise ValueError("MIN_SCRIPT_QUALITY_SCORE must be between 0 and 100.")
     return threshold
 
@@ -164,7 +153,7 @@ def get_auto_publish_settings() -> dict[str, object]:
         "privacy_status": visibility,
         "auto_approve_scripts": _get_bool("AUTO_APPROVE_SCRIPTS", False),
         "auto_approve_productions": _get_bool("AUTO_APPROVE_PRODUCTIONS", False),
-        "min_script_quality_score": _get_scaled_script_score(),
+        "min_script_quality_score": get_quality_threshold(),
         "min_audio_quality_score": _get_score("MIN_AUDIO_QUALITY_SCORE", 8.0),
         "min_video_quality_score": _get_score("MIN_VIDEO_QUALITY_SCORE", 8.0),
         "max_uploads_per_day": _get_int("MAX_UPLOADS_PER_DAY", 5, 1, 100),
@@ -202,17 +191,6 @@ def _get_score(name: str, default: float) -> float:
     if not 0 <= value <= 10:
         raise ValueError(f"{name} must be a number between 0 and 10.")
     return value
-
-
-def _get_scaled_script_score() -> float:
-    """Return MIN_SCRIPT_QUALITY_SCORE on the app's historical 0..10 scale."""
-    try:
-        value = float(os.getenv("MIN_SCRIPT_QUALITY_SCORE", "75"))
-    except ValueError as error:
-        raise ValueError("MIN_SCRIPT_QUALITY_SCORE must be a number from 0 to 100.") from error
-    if not 0 <= value <= 100:
-        raise ValueError("MIN_SCRIPT_QUALITY_SCORE must be between 0 and 100.")
-    return value / 10 if value > 10 else value
 
 
 def _get_int(name: str, default: int, minimum: int, maximum: int) -> int:

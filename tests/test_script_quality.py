@@ -3,11 +3,11 @@
 import pytest
 
 from app.agents.quality_agent import evaluate_script
-from app.config import get_speaking_rate_wps
+from app.config import get_daily_pipeline_settings, get_quality_threshold, get_speaking_rate_wps
 from app.agents.scene_agent import plan_scenes
 from app.agents.script_agent import MockScriptGenerator
 from app.agents.story_agent import structure_story
-from app.schemas.script_schema import ScriptRequest, StoryBeatPlan
+from app.schemas.script_schema import ScriptEvaluation, ScriptRequest, StoryBeatPlan
 
 
 def make_script():
@@ -16,10 +16,11 @@ def make_script():
 
 
 def test_mock_script_passes_all_heuristic_quality_checks() -> None:
-    evaluation = evaluate_script(make_script())
+    evaluation = evaluate_script(make_script(), threshold=75)
 
     assert evaluation.passed is True
-    assert evaluation.quality_score == 10
+    assert evaluation.quality_score == 100
+    assert evaluation.threshold == 75
     assert evaluation.feedback == []
     assert evaluation.language_consistency
     assert evaluation.story_coherence
@@ -105,8 +106,109 @@ def test_any_failed_safeguard_triggers_revision_even_above_threshold() -> None:
 
 
 def test_quality_threshold_must_be_in_range() -> None:
-    with pytest.raises(ValueError, match="between 0 and 10"):
-        evaluate_script(make_script(), threshold=10.1)
+    with pytest.raises(ValueError, match="between 0 and 100"):
+        evaluate_script(make_script(), threshold=100.1)
+
+
+def test_studies_show_in_narration_fails_unsupported_factual_assertions() -> None:
+    script = make_script()
+    narration = script.narration + " Studies show that everyone succeeds with this habit."
+    # Preserve canonical scene text while placing the claim in narration for evaluation.
+    script = script.model_copy(update={"narration": narration})
+
+    evaluation = evaluate_script(script)
+
+    assert evaluation.unsupported_factual_assertions is False
+
+
+def test_pure_hindi_script_fails_language_consistency() -> None:
+    script = make_script()
+    narration = " ".join("विद्यार्थी रोज़ अपनी किताब खोलकर थोड़ा पढ़ता है" for _ in range(18))
+    script = script.model_copy(update={"narration": narration})
+    roman_hindi = script.model_copy(
+        update={
+            "narration": (
+                "Aaj subah Rohan ghar par baitha. Usne dhyan se padhna shuru kiya, "
+                "par awaaz sunke ruk gaya."
+            )
+        }
+    )
+
+    assert evaluate_script(script).language_consistency is False
+    assert evaluate_script(roman_hindi).language_consistency is False
+
+
+def test_language_consistency_requires_minimum_hindi_and_english_word_shares() -> None:
+    script = make_script()
+    at_threshold = script.model_copy(
+        update={
+            "narration": "aaj roz subah page focus Aarav Meera Kabir Riya Neha"
+        }
+    )
+    below_hindi_threshold = script.model_copy(
+        update={
+            "narration": "aaj roz page focus Aarav Meera Kabir Riya Neha Noor"
+        }
+    )
+
+    assert evaluate_script(at_threshold).language_consistency
+    assert not evaluate_script(below_hindi_threshold).language_consistency
+
+
+def test_fifty_word_script_fails_duration_feasibility() -> None:
+    script = make_script()
+    words = script.narration.split()[:50]
+    segment_size = len(words) // len(script.scenes)
+    segments = [
+        " ".join(words[index * segment_size : (index + 1) * segment_size])
+        for index in range(len(script.scenes) - 1)
+    ]
+    segments.append(" ".join(words[(len(script.scenes) - 1) * segment_size :]))
+    scenes = [
+        scene.model_copy(update={"narration": segment})
+        for scene, segment in zip(script.scenes, segments, strict=True)
+    ]
+    script = script.model_copy(
+        update={"narration": " ".join(words), "scenes": scenes}
+    )
+
+    evaluation = evaluate_script(script)
+
+    assert len(script.narration.split()) == 50
+    assert evaluation.duration_feasibility is False
+
+
+def test_script_quality_threshold_uses_only_environment_value(monkeypatch) -> None:
+    monkeypatch.setenv("MIN_SCRIPT_QUALITY_SCORE", "82.5")
+    monkeypatch.setenv("MOTIVATIONOS_QUALITY_THRESHOLD", "4")
+
+    assert get_quality_threshold() == 82.5
+    assert get_daily_pipeline_settings()["min_script_quality_score"] == 82.5
+
+    monkeypatch.delenv("MIN_SCRIPT_QUALITY_SCORE")
+    assert get_quality_threshold() == 75
+
+
+def test_legacy_script_scores_are_normalized_to_one_hundred_scale() -> None:
+    evaluation = ScriptEvaluation(
+        quality_score=8,
+        threshold=7.5,
+        passed=True,
+        language_consistency=True,
+        story_coherence=True,
+        originality_safeguards=True,
+        duration_feasibility=True,
+        repetition=True,
+        motivational_message=True,
+        scene_completeness=True,
+        caption_scene_alignment=True,
+        structural_labels_absent=True,
+        unsupported_factual_assertions=True,
+        unsupported_guarantees=True,
+    )
+
+    assert evaluation.quality_score == 80
+    assert evaluation.threshold == 75
 
 
 def test_record_three_failure_patterns_are_flagged() -> None:

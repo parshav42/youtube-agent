@@ -17,6 +17,7 @@ from app.database.db import (
     ScriptNotFoundError,
     ScriptReviewError,
     get_latest_research,
+    get_rejected_scripts,
     get_script_by_id,
     initialize_database,
     review_script,
@@ -44,6 +45,7 @@ def main() -> int:
         help="Deprecated compatibility flag; all generated scripts require explicit human review.",
     )
     modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--show-rejections", action="store_true", help="Show the 10 most recent rejected scripts and failing checks.")
     modes.add_argument("--research", action="store_true", help="Run the bundled Day 1 sample-topic workflow.")
     modes.add_argument(
         "--research-with-hf", "--research-live", dest="research_with_hf", action="store_true",
@@ -86,6 +88,17 @@ def main() -> int:
         return check_huggingface()
     database_path = get_database_path()
     initialize_database(database_path)
+
+    if args.show_rejections:
+        rejected = get_rejected_scripts(database_path, limit=10)
+        if not rejected:
+            print("No rejected scripts found.")
+            return 0
+        for record in rejected:
+            print(f"ID: {record['id']} | Score: {record['quality_score']} | Topic: {record['topic']}")
+            print(f"  Stage: {record.get('rejection_stage') or 'unknown'}")
+            print(f"  {record.get('rejection_reason') or 'Failing checks: unavailable'}")
+        return 0
 
     if args.run_daily_pipeline:
         from app.daily_pipeline import DailyPipelineError, run_daily_pipeline

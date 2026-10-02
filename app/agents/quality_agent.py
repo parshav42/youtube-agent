@@ -4,17 +4,55 @@ import re
 from collections import Counter
 from math import ceil
 
+from app.config import get_quality_threshold
 from app.schemas.script_schema import MotivationalScript, ScriptEvaluation
 from app.providers.huggingface_llm import HuggingFaceLLMProvider
 from app.schemas.script_schema import LLMQualityReview
 
 HINDI_MARKERS = {
-    "aaj", "aur", "bas", "hai", "har", "kal", "ki", "kitaab", "ko", "par",
-    "phir", "roz", "subah", "toh", "usne", "waade", "woh", "yaad", "ek",
+    "aage", "aaj", "aata", "ab", "abhi", "aaye", "aaya", "agle", "apna",
+    "apne", "apni", "aur", "awaaz", "baad", "baaki", "baja", "baje", "baar",
+    "baitha", "baithi", "badhi", "bade", "bas", "bhi", "bina", "bola",
+    "chhoda", "chhodi", "chhota", "chhoti", "daba", "dabana", "dabaya", "de",
+    "dilati", "din", "diya", "dheere", "ek", "gaya", "gayi", "hai", "hain",
+    "har", "hafte", "hi", "himmat", "ho", "hote", "hua", "hui", "hum",
+    "iska", "isse", "is", "itna", "jaise", "jab", "jo", "ka", "kaam", "kam",
+    "kal", "kar", "karne", "karega", "karta", "karungi", "karke", "kaha",
+    "ke", "ki", "kiye", "kiya", "kitaab", "ko", "koshish", "kuch", "khud",
+    "kholna", "laga", "lekin", "liya", "liye", "magar", "maine", "mein",
+    "mera", "meri", "mila", "mushkil", "na", "nahi", "ne", "neend", "paas",
+    "par", "pehle", "phir", "padh", "padha", "padhai", "padhna", "raha",
+    "rakha", "rakho", "roz", "sa", "saamne", "sach", "sakte", "se", "shaam",
+    "shuru", "sirf", "socha", "subah", "tab", "tareef", "thak", "thakan",
+    "tha", "thaa", "thi", "thoda", "toh", "todne", "unka", "uthkar",
+    "uthungi", "uska", "uske", "uski", "usko", "usne", "waada", "waade",
+    "woh", "yaad", "yahan", "yeh", "zindagi", "karunga", "likha", "chamka",
+    "sunke", "sapne", "hote",
 }
 ENGLISH_MARKERS = {
-    "action", "alarm", "book", "choice", "discipline", "exam", "page", "phone",
-    "promise", "scroll", "silent", "small", "student", "time", "turning",
+    "a", "about", "again", "alarm", "all", "always", "and", "are", "as", "at",
+    "achievable", "back", "because", "before", "begin", "boost", "book", "but",
+    "button", "by", "can", "celebrate", "change", "choice", "clerk", "confidence",
+    "confusing", "day", "desk", "diary", "did", "discipline", "distract", "double",
+    "do", "down", "each", "end", "exam", "face", "feel", "first", "focus",
+    "for", "from", "get", "give", "goals",
+    "i", "if", "in", "into", "is", "it", "its", "just", "keep", "know", "last",
+    "jog", "life", "like", "little", "look", "made", "make", "manager", "me",
+    "mind", "minute", "more", "morning", "move", "my", "need", "never", "new", "next", "not",
+    "now", "of", "off", "on", "one", "only", "open", "or", "other", "our",
+    "line", "lines", "note", "notes", "notification", "notifications", "out",
+    "page", "phone", "place", "plan", "promise", "put", "read", "ready",
+    "practice", "pressure", "productivity", "punctuality", "rhythm", "right",
+    "consistency", "routine", "said", "same", "say", "see", "set", "she", "small",
+    "so", "sofa", "some", "steady",
+    "something", "start", "started", "step", "still", "stop", "student", "study",
+    "take", "tell", "than", "that", "the", "their", "then", "there", "they",
+    "scroll", "scrolling", "sentence", "side", "slowly", "smiled", "snooze",
+    "thing", "think", "this", "those", "thought", "through", "time", "timer",
+    "tired", "to", "today", "together", "too", "try", "turning", "untouched",
+    "up", "us", "use", "very", "wait", "want", "was", "way", "we", "were",
+    "what", "when", "where", "which", "will", "with", "work", "would", "write",
+    "walk", "week", "yoga", "year", "you", "your", "improved", "push", "ups",
 }
 COMMON_PHRASES = (
     "never give up",
@@ -24,16 +62,28 @@ COMMON_PHRASES = (
 )
 FACTUAL_CLAIM_PATTERNS = (
     r"\b\d+(?:\.\d+)?\s*%",
-    r"\bstudies show\b",
-    r"\bresearch proves\b",
-    r"\bscientists (?:say|prove|found)\b",
+    r"\bmost\s+(?:successful|people|students|professionals)\b",
+    r"\b(?:productivity|grades?|scores?|performance)\s+(?:double[ds]?|triple[ds]?|improved|increased)\b",
+    r"\b(?:productivity|grades?|scores?|performance)\s+(?:doubled|tripled|improved|increased)\b",
+    r"\b(?:studies?|research|science|scientists?)\b",
+    r"\b(?:according to|experts? (?:say|agree|prove)|professors?)\b",
+    r"\b(?:dr\.?|doctor|prof(?:essor)?\.?)\s+[a-z][a-z'-]+\b",
+    r"\b(?:university|universities|college|institute)\b",
+    r"\b(?:harvard|stanford|oxford|cambridge|mit)\b",
+    r"\b(?:medical|health|disease|diagnos(?:is|e)|treatment|therapy|cure|medication|blood pressure|mental health|anxiety|depression)\b",
+    r"\b(?:19|20)\d{2}\b",
 )
 UNSUPPORTED_GUARANTEE_PATTERNS = (
+    r"\bif\s+you\b[^.!?\n]{0,120}\byou\s+will\b",
     r"\byou(?:['’]ll| will)\s+(?:definitely\s+)?(?:ace|pass|top|win)\b",
+    r"\byou(?:['’]ll| will)\s+(?:definitely\s+)?(?:achieve|succeed|become|get)\b",
     r"\byou(?:['’]re| are)\s+guaranteed\b",
     r"\bguarantee(?:d|s)?\s+(?:you|that you)\b",
     r"\b(?:always|certainly)\s+(?:succeed|win|pass|ace)\b",
+    r"\bthis\s+will\s+(?:change|transform|fix)\s+your\s+life\b",
+    r"\byour\s+life\s+will\s+(?:change|transform)\b",
 )
+NARRATION_WORD_PATTERN = re.compile(r"[a-z]+|[\u0900-\u097f]+", re.IGNORECASE)
 STRUCTURAL_LABEL_PATTERN = re.compile(
     r"(?im)(?:^|[.!?])\s*(?:hook|problem|conflict|turning point|resolution|closing message)"
     r"\s*:?(?=\s*(?:\n|$))"
@@ -58,22 +108,32 @@ STORY_STAGES = (
 
 def evaluate_script(
     script: MotivationalScript,
-    threshold: float = 7.5,
+    threshold: float | None = None,
     llm_provider: HuggingFaceLLMProvider | None = None,
     speaking_rate_wps: float = 2.5,
 ) -> ScriptEvaluation:
     """Evaluate content and production readiness with deterministic safeguards plus HF review."""
-    if not 0 <= threshold <= 10:
-        raise ValueError("Quality threshold must be between 0 and 10.")
+    threshold = get_quality_threshold() if threshold is None else threshold
+    if not 0 <= threshold <= 100:
+        raise ValueError("Quality threshold must be between 0 and 100.")
     if not 1 <= speaking_rate_wps <= 5:
         raise ValueError("Speaking rate must be between 1 and 5 words per second.")
 
     narration = script.narration.lower()
     tokens = re.findall(r"[a-z]+", narration)
-    token_set = set(tokens)
-    has_hindi = bool(HINDI_MARKERS & token_set) or bool(re.search(r"[\u0900-\u097f]", narration))
-    has_english = bool(ENGLISH_MARKERS & token_set)
-    language_consistency = has_hindi and has_english
+    words = NARRATION_WORD_PATTERN.findall(narration)
+    hindi_word_count = sum(
+        "\u0900" <= word[0] <= "\u097f" or word in HINDI_MARKERS
+        for word in words
+    )
+    english_word_count = sum(
+        word in ENGLISH_MARKERS and word not in HINDI_MARKERS
+        for word in words
+    )
+    language_consistency = bool(words) and (
+        hindi_word_count / len(words) >= 0.30
+        and english_word_count / len(words) >= 0.20
+    )
 
     beat_labels = tuple(beat.split(":", 1)[0].strip().lower() for beat in script.story_beats)
     story_coherence = beat_labels == STORY_STAGES and len(script.scenes) >= 4
@@ -82,9 +142,10 @@ def evaluate_script(
     word_count = len(script.narration.split())
     words_per_second = word_count / script.target_duration_seconds
     duration_feasibility = (
-        sum(scene.duration_seconds for scene in script.scenes)
+        90 <= word_count <= 140
+        and sum(scene.duration_seconds for scene in script.scenes)
         == script.target_duration_seconds
-        and 0.7 * speaking_rate_wps <= words_per_second <= 1.25 * speaking_rate_wps
+        and 0.7 * speaking_rate_wps <= words_per_second <= 1.4 * speaking_rate_wps
     )
 
     sentence_text = [
@@ -159,17 +220,28 @@ def evaluate_script(
         ):
             checks[name] = checks[name] and getattr(review, name)
         llm_feedback = review.feedback
-    score = round(10 * sum(checks.values()) / len(checks), 2)
-    feedback = [
-        f"Address the {name.replace('_', ' ')} check."
-        for name, passed in checks.items()
-        if not passed
-    ]
-    if not checks["language_consistency"]:
-        feedback[0] = (
-            "Rewrite the narration as natural Hinglish with meaningful romanized Hindi and English; "
-            "do not merely label an English script as Hinglish."
-        )
+    score = round(100 * sum(checks.values()) / len(checks), 2)
+    feedback = []
+    for name, passed in checks.items():
+        if passed:
+            continue
+        if name == "language_consistency":
+            feedback.append(
+                "Rewrite as natural Hinglish with Hindi sentence structure; ensure at least 30% "
+                "Hindi words and 20% common English words, and verify both percentages."
+            )
+        elif name == "duration_feasibility":
+            feedback.append(
+                f"Revise narration to 90-140 words for a {script.target_duration_seconds}-second "
+                "normal-paced script, then recount before returning."
+            )
+        elif name == "unsupported_factual_assertions":
+            feedback.append(
+                "Remove statistics, research claims, unsupported results, named experts or studies, "
+                "disputed historical details, and medical or health claims."
+            )
+        else:
+            feedback.append(f"Address the {name.replace('_', ' ')} check.")
     feedback.extend(llm_feedback)
     return ScriptEvaluation(
         quality_score=score,

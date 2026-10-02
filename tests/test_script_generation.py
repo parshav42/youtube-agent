@@ -152,15 +152,30 @@ def test_hf_generation_uses_full_narration_as_scene_source() -> None:
 
     class HFResponseFixture:
         provider_name = "test fixture for schema regression"
+        system_prompt = ""
+        user_prompt = ""
 
-        def generate_structured(self, response_model, *_args, **_kwargs):
+        def generate_structured(self, response_model, system_prompt, user_prompt, **_kwargs):
             assert response_model is ScriptDraft
+            self.system_prompt = system_prompt
+            self.user_prompt = user_prompt
             return draft
 
-    script = HuggingFaceScriptGenerator(HFResponseFixture()).generate(
+    provider = HFResponseFixture()
+    script = HuggingFaceScriptGenerator(provider).generate(
         ScriptRequest(topic="discipline", target_duration_seconds=35)
     )
 
+    assert "Statistics or percentages" in provider.system_prompt
+    assert "Medical or health claims of any kind" in provider.system_prompt
+    assert "Do NOT write pure English or pure Hindi" in provider.system_prompt
+    assert "ONE specific fictional person with a name" in provider.user_prompt
+    assert "Rohan ne ek din decide kiya" in provider.user_prompt
+    assert "Studies show 90% of successful people" in provider.user_prompt
+    assert "at least 30%" in provider.user_prompt
+    assert "at least 20%" in provider.user_prompt
+    assert "between 90 and 140 words" in provider.user_prompt
+    assert "scan for every forbidden category" in provider.user_prompt
     assert script.narration == narration
     assert "".join(scene.narration for scene in script.scenes) == narration
     assert script.scenes[0].narration.startswith("Wait...")

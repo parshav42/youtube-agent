@@ -34,9 +34,9 @@ def _pipeline_fakes(monkeypatch, tmp_path, *, auto_scripts=True, auto_production
     script_records = []
     for i, score in enumerate(scores, 1):
         script_records.append({"id": i, "script": script.model_dump(mode="json"),
-                               "quality_score": score / 10,
+                               "quality_score": score,
                                "evaluation": {"passed": True}, "status": "needs_review"})
-    calls = {"draft": 0, "deleted": [], "package": 0}
+    calls = {"draft": 0, "rejected": [], "package": 0}
 
     class Workflow:
         def invoke(self, state):
@@ -52,11 +52,11 @@ def _pipeline_fakes(monkeypatch, tmp_path, *, auto_scripts=True, auto_production
         "auto_approve_scripts": auto_scripts, "auto_approve_productions": auto_productions,
         "min_script_quality_score": 75, "max_script_retries": max(0, len(scores)-1), "niche": "", "cron": ""})
     monkeypatch.setattr(pipeline, "get_topic", lambda: "discipline")
-    monkeypatch.setattr(pipeline, "get_quality_threshold", lambda: 7.5)
+    monkeypatch.setattr(pipeline, "get_quality_threshold", lambda: 75)
     monkeypatch.setattr(pipeline, "get_licensed_asset_path", lambda: library)
     monkeypatch.setattr(pipeline, "build_image_provider", lambda: object())
     monkeypatch.setattr(pipeline, "generate_scene_images", lambda *a, **k: [])
-    monkeypatch.setattr(pipeline, "delete_unreviewed_script", lambda i, db: calls["deleted"].append(i))
+    monkeypatch.setattr(pipeline, "reject_script", lambda i, reason, stage, db: calls["rejected"].append((i, reason, stage)))
     monkeypatch.setattr(pipeline, "review_script", lambda i, *a: {
         **script_records[i-1], "reviewed_at": "2026-01-01T00:00:00+00:00", "reviewed_by": "auto_pipeline"})
     metadata = {"audio_qa": {"technical_status": qa, "quality_score": 9},
@@ -122,15 +122,36 @@ def test_low_score_retries_with_fresh_topic_then_succeeds(monkeypatch, tmp_path)
     calls, _ = _pipeline_fakes(monkeypatch, tmp_path, scores=(70, 85))
     run_daily_pipeline(tmp_path / "db.sqlite3")
     assert calls["draft"] == 2
-    assert calls["deleted"] == [1]
+    assert calls["rejected"][0][0] == 1
+    assert calls["rejected"][0][2] == "quality_gate"
+    assert "minimum_quality_score" in calls["rejected"][0][1]
 
 
-def test_exhausted_script_retries_leave_no_drafts_or_package(monkeypatch, tmp_path) -> None:
+def test_exhausted_script_retries_preserve_rejected_drafts(monkeypatch, tmp_path) -> None:
     calls, _ = _pipeline_fakes(monkeypatch, tmp_path, scores=(70, 71, 72))
     with pytest.raises(DailyPipelineError, match="All 3 script attempts"):
         run_daily_pipeline(tmp_path / "db.sqlite3")
-    assert calls["deleted"] == [1, 2, 3]
+    assert [row[0] for row in calls["rejected"]] == [1, 2, 3]
+    assert all(row[1] and row[2] == "quality_gate" for row in calls["rejected"])
     assert calls["package"] == 0
+
+
+def test_show_rejections_prints_reason(monkeypatch, tmp_path, capsys) -> None:
+    from app.database.db import reject_script, save_script
+    import app.main as cli
+
+    database = tmp_path / "rejections.sqlite3"
+    script = MockScriptGenerator().generate(ScriptRequest(topic="debug topic"))
+    saved = save_script(script, database_path=database,
+                        evaluation={"passed": False, "feedback": "Hook is weak", "hook": False})
+    reject_script(saved["id"], "Failing checks: hook; feedback: Hook is weak", database_path=database)
+    monkeypatch.setattr(cli, "get_database_path", lambda: database)
+    monkeypatch.setattr("sys.argv", ["app.main", "--show-rejections"])
+
+    assert cli.main() == 0
+    output = capsys.readouterr().out
+    assert f"ID: {saved['id']}" in output
+    assert "Failing checks: hook; feedback: Hook is weak" in output
 
 
 def test_script_auto_approval_disabled_stops_with_manual_gate(monkeypatch, tmp_path) -> None:
