@@ -71,6 +71,25 @@ def test_generates_text_and_structured_json(monkeypatch):
     assert "response_format" not in client.completions.calls[1]
 
 
+def test_json_validation_error_retries_without_json_mode(monkeypatch):
+    monkeypatch.setattr(groq_module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setenv("GROQ_INTER_CALL_DELAY_SECONDS", "0")
+    json_mode_error = RuntimeError(
+        "Failed to validate JSON. Please adjust your prompt."
+    )
+    json_mode_error.status_code = 400
+    json_mode_error.code = "json_validate_failed"
+    client = FakeClient([json_mode_error, json.dumps({"answer": "recovered"})])
+    provider = GroqProvider("model", "key", max_retries=0, client=client)
+
+    result = provider.generate_structured(Answer, "system", "return JSON")
+
+    assert result.answer == "recovered"
+    assert client.completions.calls[0]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in client.completions.calls[1]
+    assert len(client.completions.calls) == 2
+
+
 @pytest.mark.parametrize("status_code", [401, 429, 500])
 def test_http_failures_use_shared_typed_error(status_code):
     response_error = RuntimeError(f"HTTP {status_code}")

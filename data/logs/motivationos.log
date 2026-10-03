@@ -2183,3 +2183,37 @@ INFO:     2401:4900:52b7:8a2a:66c9:2177:add3:b9ce:0 - "GET /api/productions HTTP
 INFO:     2401:4900:52b7:8a2a:66c9:2177:add3:b9ce:0 - "GET /api/productions/19532583a59b457f8ebd9c5ea3133917/review HTTP/1.1" 200 OK
 INFO:     2401:4900:52b7:8a2a:66c9:2177:add3:b9ce:0 - "GET /media/productions/19532583a59b457f8ebd9c5ea3133917/final.mp4 HTTP/1.1" 304 Not Modified
 INFO:     2401:4900:52b7:8a2a:66c9:2177:add3:b9ce:0 - "GET /api/productions HTTP/1.1" 200 OK
+INFO:     Started server process [1577]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [1577]
+INFO:     Started server process [1575]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [1575]
+INFO:     Started server process [1577]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started server process [1577]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:54878 - "GET /production-review HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54878 - "GET /review-assets/review.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54880 - "GET /review-assets/nav.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54880 - "GET /review-assets/admin-auth.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54878 - "GET /review-assets/production-review.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54878 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     Started server process [1583]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)

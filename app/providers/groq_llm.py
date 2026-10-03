@@ -127,6 +127,7 @@ class GroqProvider(HuggingFaceLLMProvider):
         last_error: Exception | None = None
         rate_limit_retries = 0
         attempt = 0
+        json_mode_fallback_used = False
         while attempt < attempts:
             try:
                 arguments: dict[str, Any] = {
@@ -154,6 +155,18 @@ class GroqProvider(HuggingFaceLLMProvider):
             except Exception as error:
                 last_error = error
                 status = _status_code(error)
+                if (
+                    json_mode
+                    and not json_mode_fallback_used
+                    and status == 400
+                    and (
+                        getattr(error, "code", None) == "json_validate_failed"
+                        or "json_validate_failed" in str(error)
+                    )
+                ):
+                    json_mode = False
+                    json_mode_fallback_used = True
+                    continue
                 if status == 429 and rate_limit_retries < 3:
                     rate_limit_retries += 1
                     match = re.search(r"try again in\s+([\d.]+)\s*s", str(error), re.IGNORECASE)
