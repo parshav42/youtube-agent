@@ -139,6 +139,8 @@ class GroqProvider(HuggingFaceLLMProvider):
                     "max_tokens": max_tokens,
                     "temperature": 0.4,
                 }
+                if self.model.lower().startswith("openai/gpt-oss-"):
+                    arguments["reasoning_effort"] = "low"
                 if json_mode:
                     arguments["response_format"] = {"type": "json_object"}
                 response = self._client.chat.completions.create(**arguments)
