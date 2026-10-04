@@ -71,6 +71,16 @@ def test_generates_text_and_structured_json(monkeypatch):
     assert "response_format" not in client.completions.calls[1]
 
 
+def test_gpt_oss_uses_low_reasoning_effort(monkeypatch):
+    monkeypatch.setattr(groq_module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setenv("GROQ_INTER_CALL_DELAY_SECONDS", "0")
+    client = FakeClient(["generated"])
+    provider = GroqProvider("openai/gpt-oss-120b", "key", max_retries=0, client=client)
+
+    assert provider.generate_text("system", "prompt") == "generated"
+    assert client.completions.calls[0]["reasoning_effort"] == "low"
+
+
 def test_json_validation_error_retries_without_json_mode(monkeypatch):
     monkeypatch.setattr(groq_module.time, "sleep", lambda _seconds: None)
     monkeypatch.setenv("GROQ_INTER_CALL_DELAY_SECONDS", "0")
