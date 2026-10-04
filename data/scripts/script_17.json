@@ -1,0 +1,67 @@
+{
+  "topic": "Discipline and consistency",
+  "language": "Hinglish",
+  "target_duration_seconds": 35,
+  "title_candidates": [
+    "Subah ka Alarm, Rohan ki Kahani",
+    "Roz ki Routine, Badalte Rohan",
+    "Choti Jeet, Badi Badlaav"
+  ],
+  "opening_hook": "Rohan subah alarm sunke bhi phone check karta tha, lekin ek din sab badal gaya.",
+  "narration": "Rohan ek chhota sa ladka tha jo subah alarm sunke bhi phone check karta tha. Ek din usne decide kiya ki woh roz 5 baje uthega aur timer set karega. Har raat wo apni notebook ka page khol ke next day ki routine likhta. Pehle to uska focus tut-ta, par usne practice ki aur har din 10 minute meditation ki. Aaj usne apna alarm bina snooze kiye band kiya, phone side pe rakh diya, aur kitchen mein chai banate hue apna first page likha. Yeh choti jeet uske confidence ko boost kar gayi, aur ab wo har roz disciplined feel karta hai.",
+  "story_beats": [
+    "Hook: Rohan, a small boy, still checks his phone after the morning alarm.",
+    "Problem: He realizes his habit of snoozing and scrolling steals his precious early hours.",
+    "Conflict: Determined to change, he decides to wake up at 5 am, set a timer, and write his next‑day routine each night, but his focus keeps breaking.",
+    "Turning point: He adds a daily 10‑minute meditation and places his phone aside, finally turning off the alarm without snoozing and writing his first page while making tea.",
+    "Resolution: The small victory boosts his confidence, and he now feels disciplined every day.",
+    "Closing message: Har choti jeet se banta hai bada confidence, bas lagataar practice karo."
+  ],
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration_seconds": 9,
+      "narration": "Rohan ek chhota sa ladka tha jo subah alarm sunke bhi phone check karta tha. Ek din usne decide kiya ki woh roz 5 baje uthega aur timer set karega. ",
+      "visual_description": "Vertical 9:16, Morning light filters through a bedroom window as the alarm rings. Rohan groggily reaches for his phone, glances at the screen, then places the phone down and looks determined, reaching for a bedside timer.",
+      "caption": "Rohan alarm sunke phone check karta, 5 baje uthane ka timer set karta",
+      "transition": "quick cut to next scene",
+      "audio_direction": "soft morning ambience with faint alarm chime, then a subtle click of the timer"
+    },
+    {
+      "scene_number": 2,
+      "duration_seconds": 9,
+      "narration": "Har raat wo apni notebook ka page khol ke next day ki routine likhta. ",
+      "visual_description": "Vertical 9:16, A dimly lit desk lamp illuminates a spiral notebook. Rohan flips to a fresh page, writes a tidy schedule for the next morning, and circles the 5 AM wake‑up time with a pen.",
+      "caption": "Rohan notebook khol ke agle din ki routine likhta",
+      "transition": "smooth fade into the following scene",
+      "audio_direction": "gentle paper rustle and pen scratching, low evening hum"
+    },
+    {
+      "scene_number": 3,
+      "duration_seconds": 9,
+      "narration": "Pehle to uska focus tut-ta, par usne practice ki aur har din 10 minute meditation ki. Aaj usne apna alarm bina snooze kiye band kiya, phone side pe rakh diya, aur kitchen mein chai banate hue apna first page likha. ",
+      "visual_description": "Vertical 9:16, Rohan sits cross‑legged on a kitchen floor mat, eyes closed, breathing calmly. The alarm stops without snooze. He places his phone on the counter, boils water, pours tea, and returns to the notebook to write his first page of the new habit log.",
+      "caption": "Rohan meditation karta, alarm bina snooze band karta, chai banate hue page likhta",
+      "transition": "wipe left to reveal the kitchen scene",
+      "audio_direction": "soft breathing, muted kettle whistle, light background music building confidence"
+    },
+    {
+      "scene_number": 4,
+      "duration_seconds": 8,
+      "narration": "Yeh choti jeet uske confidence ko boost kar gayi, aur ab wo har roz disciplined feel karta hai.",
+      "visual_description": "Vertical 9:16, Rohan stands confidently in the kitchen, sipping tea, with a bright sunrise visible through the window. A subtle overlay shows a progress bar filling up, symbolizing growing confidence.",
+      "caption": "Choti jeet se Rohan ka confidence boost hota hai, roz disciplined feel karta hai",
+      "transition": "fade out to black",
+      "audio_direction": "uplifting soft music crescendo, gentle chime at the end"
+    }
+  ],
+  "closing_message": "Har choti jeet se banta hai bada confidence, bas lagataar practice karo.",
+  "description": "A short motivational story about Rohan's journey to build discipline through small daily actions, perfect for a YouTube Shorts format.",
+  "hashtags": [
+    "#Discipline",
+    "#Consistency",
+    "#Motivation"
+  ],
+  "quality_score": 100.0,
+  "revision_notes": []
+}
