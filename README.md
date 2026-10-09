@@ -180,4 +180,4 @@ The repository currently has **301 passing tests**.
 Issues and pull requests are welcome. Please describe the problem or change clearly, keep credentials out of commits, and run the test suite before opening a pull request.
 
 
-<p align="center"><sub>Made in India 🇮🇳 · Built for the next story worth sharing.</sub></p>
+<!-- <p align="center"><sub>Made in India 🇮🇳 · Built for the next story worth sharing.</sub></p> -->
