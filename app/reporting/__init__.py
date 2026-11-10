@@ -1,1 +1,0 @@
-"""Local daily reporting and optional email delivery."""

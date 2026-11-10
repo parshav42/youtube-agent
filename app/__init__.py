@@ -1,1 +1,0 @@
-"""MotivationOS research foundation."""
