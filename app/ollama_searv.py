@@ -29,7 +29,3 @@ def run_ollama():
 
     except FileNotFoundError:
         print("Ollama or systemctl command not found.")
-
-
-if __name__ == "__main__":
-    run_ollama()
