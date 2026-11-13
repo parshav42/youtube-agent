@@ -1,7 +1,12 @@
 
+import json
+
+from dotenv import load_dotenv
 from ollama_searv import run_ollama
 from openai import OpenAI
-from tool import tool
+from tool import google_search, tool
+
+load_dotenv()
 
 # Start Ollama
 run_ollama()
@@ -33,29 +38,44 @@ try:
             "content": user_input
         })
 
-        # Generate response
+        # Ask the model whether it needs to search before answering.
         result = client.chat.completions.create(
             model="qwen3:1.7b",
             messages=messages,
-            Tool=tool,
-            stream=True
+            tools=tool,
         )
 
-        # Collect streamed response
-        assistant_response = ""
+        tool_rounds = 0
+        while result.choices[0].message.tool_calls:
+            if tool_rounds >= 5:
+                raise RuntimeError("The model exceeded the maximum tool-call rounds.")
 
-        print("AI: ", end="", flush=True)
+            assistant_message = result.choices[0].message
+            messages.append(assistant_message.model_dump(exclude_none=True))
 
-        for chunk in result:
-            content = chunk.choices[0].delta.content
+            for tool_call in assistant_message.tool_calls:
+                if tool_call.function.name != "google_search":
+                    raise RuntimeError(
+                        f"Unsupported tool requested: {tool_call.function.name}"
+                    )
 
-            if content:
-                print(content, end="", flush=True)
-                assistant_response += content
+                arguments = json.loads(tool_call.function.arguments)
+                tool_result = google_search(**arguments)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": tool_result,
+                })
 
-        print()
+            tool_rounds += 1
+            result = client.chat.completions.create(
+                model="qwen3:1.7b",
+                messages=messages,
+                tools=tool,
+            )
 
-        # Store assistant response
+        assistant_response = result.choices[0].message.content or ""
+        print(f"AI: {assistant_response}")
         messages.append({
             "role": "assistant",
             "content": assistant_response
