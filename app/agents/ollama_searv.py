@@ -1,30 +1,35 @@
-import os 
-import schedule
-import time
-
-g ='ollama serve'
-p='sudo systemctl stop ollama'
 
 import subprocess
+import time
 
-# 1. Run a simple command (e.g., 'ls' on Mac/Linux or 'dir' on Windows)
-# 'shell=True' allows you to pass the command as a plain string\
 
-def ollama():
+def run_ollama():
     try:
-        print("Okk! ollama serve is running")
-        subprocess.run(g, shell=True)
-        
-    except:
-        subprocess.run(p, shell=True)
-        print("ollama serve is not running, stopping the service.")
+        # Check whether Ollama is already running
+        result = subprocess.run(
+            ["systemctl", "is-active", "--quiet", "ollama"]
+        )
+
+        if result.returncode == 0:
+            print("Ollama service is already running.")
+            return
+
+        # Start Ollama service
+        subprocess.run(
+            ["sudo", "systemctl", "start", "ollama"],
+            check=True
+        )
+
+        time.sleep(2)
+
+        print("Ollama service started successfully.")
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error starting Ollama: {e}")
+
+    except FileNotFoundError:
+        print("Ollama or systemctl command not found.")
 
 
-def my_task():
-    print("Task is running...")
-
-# Schedule intervals
-schedule.every(10).seconds.do(ollama)
-schedule.every(10).seconds.do(my_task)
-# schedule.every().hour.do(my_task)
-# schedule.every().day.at("10:30").do(my_task)
+if __name__ == "__main__":
+    run_ollama()
