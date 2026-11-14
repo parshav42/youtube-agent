@@ -1,20 +1,22 @@
-# Ollama Chat Assistant
+# ElevenLabs Narrated Video Maker
 
-A simple command-line chat assistant powered by Ollama. It can search Google
-when it needs current information.
+Turn a written story into a narrated MP4. ElevenLabs Text to Speech reads the
+story aloud, and the app creates matching local title cards and assembles them
+with the narration using FFmpeg. This workflow does not use Google or paid
+image/video generation APIs.
 
 ## Requirements
 
-- Python
-- [Ollama](https://ollama.com/)
-- A Google Custom Search API key and Search Engine ID for web search
+- Python 3.10+
+- [ElevenLabs API key](https://elevenlabs.io/) with Text to Speech access
+- FFmpeg and `ffprobe`
 
 ## Setup
 
-Install the model and project dependencies:
+Install FFmpeg if needed (on Ubuntu/Debian, run `sudo apt install ffmpeg`),
+then install the project dependencies:
 
 ```bash
-ollama pull qwen3:1.7b
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -26,20 +28,19 @@ On Windows, activate the environment with:
 .venv\Scripts\Activate.ps1
 ```
 
-For Google search, create a `.env` file in the project folder:
-
-```env
-GOOGLE_API_KEY=your-google-api-key
-GOOGLE_CSE_ID=your-search-engine-id
-```
-
-Keep `.env` private; do not commit your keys.
+The app loads `.env` and reads `ELEVENLABS_API_KEY`. The ElevenLabs onboarding
+CLI can configure this key. Optionally set `ELEVENLABS_VOICE_ID` to a voice ID
+available to your account; otherwise, the app uses the first available voice.
+Keep `.env` private; do not commit your key.
 
 ## Run
+
+From the project root:
 
 ```bash
 python app/main.py
 ```
 
-Type a message to chat. Type `exit` to quit. Ollama must be running; on Linux,
-the app attempts to start its `ollama` system service if it is stopped.
+Paste your story or narration when prompted. The generated 720p MP4 is saved
+in `output/`. Longer narration creates more title cards. Image and video
+generation through ElevenLabs Flows is not used.

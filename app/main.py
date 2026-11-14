@@ -1,84 +1,49 @@
+import os
+from pathlib import Path
 
-import json
-
+import requests
 from dotenv import load_dotenv
-from ollama_searv import run_ollama
-from openai import OpenAI
-from tool import google_search, tool
+from elevenlabs import ElevenLabs
+from elevenlabs.core.api_error import ApiError
 
-load_dotenv()
+if __package__:
+    from .video_generator import create_video
+else:
+    from video_generator import create_video
 
-# Start Ollama
-run_ollama()
 
-# Connect to Ollama
-client = OpenAI(
-    base_url="http://127.0.0.1:11434/v1/",
-    api_key="ollama"
-)
+def main() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    load_dotenv(project_root / ".env")
 
-# Conversation history
-messages = [
-    {
-        "role": "system",
-        "content": "You are a helpful assistant. Answer in 10 words or less."
-    }
-]
-
-try: 
-    while True:
-        user_input = input("Me: ")
-
-        if user_input.lower() == "exit":
-            break
-
-        # Store user message
-        messages.append({
-            "role": "user",
-            "content": user_input
-        })
-
-        # Ask the model whether it needs to search before answering.
-        result = client.chat.completions.create(
-            model="qwen3:1.7b",
-            messages=messages,
-            tools=tool,
+    api_key = os.getenv("ELEVENLABS_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "Missing ELEVENLABS_API_KEY in the project .env file. "
+            "Run `npx -y @elevenlabs/cli@latest onboard check --env-path .env`."
         )
+    client = ElevenLabs(api_key=api_key, timeout=60)
 
-        tool_rounds = 0
-        while result.choices[0].message.tool_calls:
-            if tool_rounds >= 5:
-                raise RuntimeError("The model exceeded the maximum tool-call rounds.")
+    prompt = input("Describe the video to create: ").strip()
+    if not prompt:
+        raise ValueError("Video description cannot be empty.")
 
-            assistant_message = result.choices[0].message
-            messages.append(assistant_message.model_dump(exclude_none=True))
+    video_path = create_video(
+        prompt=prompt,
+        client=client,
+        output_dir=project_root / "output",
+    )
+    print(f"Video saved to: {video_path}")
 
-            for tool_call in assistant_message.tool_calls:
-                if tool_call.function.name != "google_search":
-                    raise RuntimeError(
-                        f"Unsupported tool requested: {tool_call.function.name}"
-                    )
 
-                arguments = json.loads(tool_call.function.arguments)
-                tool_result = google_search(**arguments)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": tool_result,
-                })
-
-            tool_rounds += 1
-            result = client.chat.completions.create(
-                model="qwen3:1.7b",
-                messages=messages,
-                tools=tool,
-            )
-
-        assistant_response = result.choices[0].message.content or ""
-        print(f"AI: {assistant_response}")
-        messages.append({
-            "role": "assistant",
-            "content": assistant_response
-        })
-except KeyboardInterrupt:
-    print("\nExiting...")
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nVideo generation cancelled.")
+    except requests.RequestException as error:
+        print(f"\nA network request failed: {error}")
+    except ApiError as error:
+        print(f"\nElevenLabs API error ({error.status_code}): {error.body}")
+    except (RuntimeError, ValueError) as error:
+        print(f"\nError: {error}")
