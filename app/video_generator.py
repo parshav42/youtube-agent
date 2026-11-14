@@ -78,7 +78,7 @@ def _generate_narration(
 ) -> None:
     voice_id = os.getenv("ELEVENLABS_VOICE_ID")
     if not voice_id:
-        voices = client.voices.get_all()
+        voices = client.voices.get_all().voices
         if not voices:
             raise RuntimeError(
                 "No ElevenLabs voices are available for this account. "
