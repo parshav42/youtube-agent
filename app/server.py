@@ -16,12 +16,12 @@ from elevenlabs import ElevenLabs
 if __package__:
     from .image_prompt_generator import LocalImagePromptGenerator
     from .supabase_store import StoredVideoJob, StoredVideoResult, SupabaseStore
-    from .text_generator import HuggingFaceTextGenerator
+    from .text_generator import create_text_generator
     from .video_generator import VideoGenerationCancelled, create_video
 else:
     from image_prompt_generator import LocalImagePromptGenerator
     from supabase_store import StoredVideoJob, StoredVideoResult, SupabaseStore
-    from text_generator import HuggingFaceTextGenerator
+    from text_generator import create_text_generator
     from video_generator import VideoGenerationCancelled, create_video
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -185,7 +185,7 @@ def _run_video_job(job_id: str, idea: str) -> None:
             client=client,
             output_dir=OUTPUT_ROOT,
             image_prompt_generator=LocalImagePromptGenerator(),
-            text_generator=HuggingFaceTextGenerator(),
+            text_generator=create_text_generator(),
             progress_callback=report_progress,
             cancel_requested=control.cancel_event.is_set,
         )

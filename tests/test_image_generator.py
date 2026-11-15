@@ -9,7 +9,11 @@ from PIL import Image
 from app import video_generator
 from app.image_generator import create_image
 from app.image_prompt_generator import LocalImagePromptGenerator
-from app.text_generator import HuggingFaceTextGenerator
+from app.text_generator import (
+    HuggingFaceTextGenerator,
+    OllamaTextGenerator,
+    create_text_generator,
+)
 
 
 def test_hugging_face_text_generator_parses_chat_completion(
@@ -124,10 +128,104 @@ def test_hugging_face_text_generator_does_not_expose_token_in_request_errors(
     monkeypatch.setattr("app.text_generator.requests.post", fake_post)
     generator = HuggingFaceTextGenerator()
 
-    with pytest.raises(RuntimeError, match="Hugging Face inference request failed") as error:
+    with pytest.raises(RuntimeError, match="Could not connect to Hugging Face") as error:
         generator.generate_dialogue("A fox finds a hidden door.")
 
     assert token not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("status_code", "message"),
+    [
+        (401, "HF_TOKEN is invalid"),
+        (403, "HF_TOKEN is invalid"),
+        (404, "HF_MODEL 'test-model' is unavailable"),
+        (429, "rate limit exceeded"),
+        (503, "failed with HTTP 503"),
+    ],
+)
+def test_hugging_face_text_generator_reports_provider_http_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+    message: str,
+) -> None:
+    class FakeResponse:
+        def __init__(self, response_status: int) -> None:
+            self.status_code = response_status
+
+        def raise_for_status(self) -> None:
+            error = requests.HTTPError(response=self)
+            raise error
+
+    monkeypatch.setenv("HF_TOKEN", "test-token")
+    monkeypatch.setenv("HF_MODEL", "test-model")
+    monkeypatch.setattr(
+        "app.text_generator.requests.post",
+        lambda *_args, **_kwargs: FakeResponse(status_code),
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        HuggingFaceTextGenerator().generate_dialogue("A fox finds a hidden door.")
+
+
+def test_text_generator_defaults_to_hugging_face_without_ollama_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
+    with pytest.raises(RuntimeError, match="Missing HF_TOKEN"):
+        create_text_generator()
+
+
+def test_text_generator_uses_hugging_face_when_token_is_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.setenv("HF_TOKEN", "test-token")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
+    generator = create_text_generator()
+
+    assert isinstance(generator, HuggingFaceTextGenerator)
+
+
+def test_text_generator_uses_ollama_only_when_explicitly_selected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict[str, str]:
+            return {"response": "A local generated story."}
+
+    requests_seen: list[tuple[str, dict[str, object]]] = []
+
+    def fake_post(
+        url: str,
+        json: dict[str, object],
+        timeout: int,
+    ) -> FakeResponse:
+        requests_seen.append((url, json))
+        assert timeout == 180
+        return FakeResponse()
+
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama.local:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "local-model")
+    monkeypatch.setattr("app.text_generator.requests.post", fake_post)
+
+    generator = create_text_generator()
+
+    assert isinstance(generator, OllamaTextGenerator)
+    assert generator.base_url == "http://ollama.local:11434"
+    assert generator.generate_dialogue("A fox finds a hidden door.") == (
+        "A local generated story."
+    )
+    assert requests_seen[0][0] == "http://ollama.local:11434/api/generate"
+    assert requests_seen[0][1]["model"] == "local-model"
 
 
 def test_hugging_face_text_generator_rejects_empty_video_idea(

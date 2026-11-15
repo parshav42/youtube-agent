@@ -15,11 +15,11 @@ from PIL import Image, ImageDraw, ImageFont
 if __package__:
     from .image_generator import create_image
     from .image_prompt_generator import ImagePromptGenerator, LocalImagePromptGenerator
-    from .text_generator import HuggingFaceTextGenerator, TextGenerator
+    from .text_generator import TextGenerator, create_text_generator
 else:
     from image_generator import create_image
     from image_prompt_generator import ImagePromptGenerator, LocalImagePromptGenerator
-    from text_generator import HuggingFaceTextGenerator, TextGenerator
+    from text_generator import TextGenerator, create_text_generator
 
 VIDEO_WIDTH = 1280
 VIDEO_HEIGHT = 720
@@ -269,11 +269,11 @@ def create_video(
     if image_prompt_generator is None:
         image_prompt_generator = LocalImagePromptGenerator()
     if text_generator is None:
-        text_generator = HuggingFaceTextGenerator()
+        text_generator = create_text_generator()
 
     _check_cancelled(cancel_requested)
     if progress_callback is not None:
-        progress_callback("dialogue", "Writing the script with Hugging Face...")
+        progress_callback("dialogue", "Writing the script...")
     narration = text_generator.generate_dialogue(video_idea).strip()
     _check_cancelled(cancel_requested)
     if not narration:

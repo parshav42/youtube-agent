@@ -94,6 +94,7 @@ def test_video_job_generates_script_with_hugging_face_only(
         return FakeResponse()
 
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_PROVIDER", "huggingface")
     monkeypatch.setenv("HF_TOKEN", "test-token")
     monkeypatch.setenv("HF_MODEL", "Qwen/Qwen3-4B-Instruct-2507")
     monkeypatch.setenv("HF_BASE_URL", "https://router.huggingface.co/v1")

@@ -50,6 +50,11 @@ HF_BASE_URL=https://router.huggingface.co/v1
 `HF_MODEL` and `HF_BASE_URL` default to the values above. Keep `HF_TOKEN`
 private; it is used only by the backend and must not be added to frontend
 configuration.
+The backend defaults to `LLM_PROVIDER=huggingface`; if `HF_TOKEN` is missing,
+generation fails explicitly instead of falling back to a local service. For
+local development only, set `LLM_PROVIDER=ollama` to opt in to Ollama and
+optionally configure `OLLAMA_BASE_URL` and `OLLAMA_MODEL`. Railway should keep
+`LLM_PROVIDER=huggingface` or leave it unset.
 
 To persist video ideas, job progress, results, and generated files in Supabase:
 
@@ -175,6 +180,7 @@ variables below. Keep the Hugging Face token in Railway's server-side variables:
 HF_TOKEN=your-server-only-token
 HF_MODEL=Qwen/Qwen3-4B-Instruct-2507
 HF_BASE_URL=https://router.huggingface.co/v1
+LLM_PROVIDER=huggingface
 ELEVENLABS_API_KEY=your-server-only-key
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SECRET_KEY=your-server-only-key
@@ -187,6 +193,7 @@ Vercel same-origin proxy, set `CORS_ALLOWED_ORIGINS` on the API service.
 HF_TOKEN=your-server-only-token
 HF_MODEL=Qwen/Qwen3-4B-Instruct-2507
 HF_BASE_URL=https://router.huggingface.co/v1
+LLM_PROVIDER=huggingface
 ELEVENLABS_API_KEY=your-server-only-key
 CORS_ALLOWED_ORIGINS=https://your-project.vercel.app,https://www.your-domain.com
 ```
