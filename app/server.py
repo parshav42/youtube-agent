@@ -30,6 +30,14 @@ FRONTEND_ROOT = PROJECT_ROOT / "frontend" / "dist"
 MAX_REQUEST_SIZE = 64 * 1024
 
 
+def _allowed_cors_origins() -> set[str]:
+    return {
+        origin.strip().rstrip("/")
+        for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+        if origin.strip()
+    }
+
+
 VideoResult = StoredVideoResult
 
 
@@ -252,6 +260,25 @@ def _run_video_job(job_id: str, idea: str) -> None:
 
 
 class VideoRequestHandler(BaseHTTPRequestHandler):
+    def end_headers(self) -> None:
+        origin = self.headers.get("Origin")
+        if origin and origin in _allowed_cors_origins():
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Max-Age", "600")
+            self.send_header("Vary", "Origin")
+        super().end_headers()
+
+    def do_OPTIONS(self) -> None:
+        origin = self.headers.get("Origin")
+        if not origin or origin not in _allowed_cors_origins():
+            self.send_error(403, "Origin is not allowed.")
+            return
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _send_json(self, status_code: int, payload: object) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status_code)
@@ -433,9 +460,10 @@ class VideoRequestHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     load_dotenv(PROJECT_ROOT / ".env")
-    port = int(os.getenv("APP_PORT", "8000"))
-    with ThreadingHTTPServer(("127.0.0.1", port), VideoRequestHandler) as server:
-        print(f"Video generator ready at http://127.0.0.1:{port}", flush=True)
+    host = os.getenv("APP_HOST", "127.0.0.1")
+    port = int(os.getenv("APP_PORT", os.getenv("PORT", "8000")))
+    with ThreadingHTTPServer((host, port), VideoRequestHandler) as server:
+        print(f"Video generator ready at http://{host}:{port}", flush=True)
         server.serve_forever()
 
 

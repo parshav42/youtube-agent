@@ -25,6 +25,38 @@ def _running_server() -> Iterator[str]:
         http_server.server_close()
 
 
+def test_video_api_allows_preflight_only_for_configured_origins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    allowed_origin = "https://utubeagent.vercel.app"
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", f"{allowed_origin}/")
+
+    with _running_server() as base_url:
+        preflight = Request(
+            f"{base_url}/api/videos",
+            headers={
+                "Origin": allowed_origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+            method="OPTIONS",
+        )
+        with urlopen(preflight, timeout=3) as response:
+            assert response.status == 204
+            assert response.headers["Access-Control-Allow-Origin"] == allowed_origin
+            assert response.headers["Access-Control-Allow-Methods"] == "GET, POST, OPTIONS"
+            assert response.headers["Vary"] == "Origin"
+
+        rejected_preflight = Request(
+            f"{base_url}/api/videos",
+            headers={"Origin": "https://untrusted.example"},
+            method="OPTIONS",
+        )
+        with pytest.raises(HTTPError) as error:
+            urlopen(rejected_preflight, timeout=3)
+        assert error.value.code == 403
+
+
 def test_video_api_validates_and_tracks_a_job(monkeypatch: pytest.MonkeyPatch) -> None:
     job_finished = threading.Event()
     created_ideas: list[str] = []

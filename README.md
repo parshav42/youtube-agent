@@ -126,8 +126,47 @@ npm --prefix frontend run format:check
 npm --prefix frontend run build
 ```
 
-For the production deployment used by this project, build the static frontend
-and run the Python server:
+## Deploy the website to Vercel
+
+The root [`vercel.json`](vercel.json) configures Vercel to install the frontend,
+build the Vite app, publish `frontend/dist`, and serve React Router routes on
+direct visits. Import the repository with the **repository root** as the Vercel
+project root; do not set it to `frontend`.
+
+Set `VITE_API_URL` in the Vercel project's Environment Variables to the public
+base URL of the separately hosted API (for example,
+`https://api.example.com`, with no trailing slash). Set it for each Vercel
+environment you use, then redeploy so Vite can include it in the build. Without
+this value, the marketing pages deploy, but video generation cannot reach an
+API from Vercel.
+
+### Video-generation API
+
+Vercel hosts the static website, not this repository's Python video-generation
+server. The API uses a long-running HTTP server, background threads, FFmpeg,
+Ollama, and generated-file storage, so it must run separately on a persistent
+Python/container host. Configure that host with the required Python packages
+and FFmpeg, and set:
+
+```dotenv
+APP_HOST=0.0.0.0
+PORT=8000
+OLLAMA_BASE_URL=https://your-reachable-ollama-host
+CORS_ALLOWED_ORIGINS=https://your-project.vercel.app,https://www.your-domain.com
+```
+
+Use the port assigned by your hosting provider. Add the exact Vercel production
+and custom-domain origins to `CORS_ALLOWED_ORIGINS` (no paths); preview
+deployments need their own origins if they should access the API. CORS is
+disabled by default and does not replace API authentication or rate limiting.
+Protect the generation endpoint before making a paid-provider-backed API
+public. Keep `ELEVENLABS_API_KEY` and Supabase service credentials on the API
+host only, never in Vercel's `VITE_*` variables. For cloud hosting, configure
+Supabase or another persistent/shared asset store rather than relying on
+ephemeral local output files.
+
+For a self-hosted deployment that serves both the static frontend and API from
+the same process, build the frontend and run the Python server:
 
 ```bash
 npm --prefix frontend run build
