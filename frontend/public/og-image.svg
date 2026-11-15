@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" fill="none">
+  <defs>
+    <linearGradient id="background" x1="120" y1="30" x2="1090" y2="630" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EEF1F3"/>
+      <stop offset=".55" stop-color="#E8EDEF"/>
+      <stop offset="1" stop-color="#F0E9E2"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="323" y1="234" x2="872" y2="414" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#DF7840"/>
+      <stop offset=".48" stop-color="#E8A05E"/>
+      <stop offset="1" stop-color="#419FBE"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="matrix(489 0 0 313 862 178)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#419FBE" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#419FBE" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path fill="url(#background)" d="M0 0h1200v630H0z"/>
+  <path fill="url(#glow)" d="M0 0h1200v630H0z"/>
+  <g opacity=".12" stroke="#345E7C">
+    <path d="M96 0v630M168 0v630M240 0v630M312 0v630M384 0v630M456 0v630M528 0v630M600 0v630M672 0v630M744 0v630M816 0v630M888 0v630M960 0v630M1032 0v630M1104 0v630"/>
+    <path d="M0 70h1200M0 142h1200M0 214h1200M0 286h1200M0 358h1200M0 430h1200M0 502h1200M0 574h1200"/>
+  </g>
+  <path d="M103 136v12c0 12 7 18 17 18s17-6 17-18v-12" stroke="#E63946" stroke-width="6" stroke-linecap="round"/>
+  <path d="M94 158c15-14 37-18 54-26-10 15-29 28-53 38" stroke="#F59E0B" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M143 122c2.2 5.2 4 7 9 9-5 1.8-6.8 3.6-9 9-2.2-5.4-4-7.2-9-9 5-2 6.8-3.8 9-9Z" fill="#F59E0B"/>
+  <text x="155" y="158" fill="#E63946" font-family="Arial,sans-serif" font-size="24" font-weight="700">U</text>
+  <text x="172" y="158" fill="#17283D" font-family="Arial,sans-serif" font-size="24" font-weight="700">Tube</text>
+  <text x="228" y="158" fill="#2864F0" font-family="Arial,sans-serif" font-size="24" font-weight="700">Agent</text>
+  <text x="156" y="179" fill="#65768C" font-family="Arial,sans-serif" font-size="9" font-weight="700" letter-spacing="2">CREATE  •  AUTOMATE  •  GROW</text>
+  <text x="94" y="292" fill="#17283D" font-family="Arial,sans-serif" font-size="64" font-weight="600" letter-spacing="-3">Turn any idea into a</text>
+  <text x="94" y="370" fill="url(#accent)" font-family="Arial,sans-serif" font-size="64" font-weight="600" letter-spacing="-3">YouTube video.</text>
+  <text x="98" y="425" fill="#53677B" font-family="Arial,sans-serif" font-size="22">Your story, illustrated, narrated, and ready to share.</text>
+  <circle cx="988" cy="345" r="148" fill="#F4F6F5" fill-opacity=".68" stroke="#80B2C4" stroke-opacity=".6"/>
+  <circle cx="988" cy="345" r="111" fill="#EEF1F1" stroke="#D99265" stroke-opacity=".55"/>
+  <path d="m966 298 74 47-74 47v-94Z" fill="url(#accent)"/>
+</svg>

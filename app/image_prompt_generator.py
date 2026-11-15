@@ -15,3 +15,9 @@ class LocalImagePromptGenerator:
             "Create a cinematic 16:9 illustration of this story moment: "
             f"{segment}. Do not include text or lettering."
         )
+
+'''
+
+mae one frontend for this so user propely do work all steps see user how 
+use typscrip and high language so in future i cn add ther animation in fronted 
+'''
