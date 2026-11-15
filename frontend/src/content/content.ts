@@ -1,5 +1,5 @@
 export const brand = {
-  name: "UTubeAgent",
+  name: "UtubeAgent",
   description:
     "Turn a video idea into a finished YouTube video. Write the story, create illustrated shots, generate a voiceover, and assemble your MP4.",
 };
@@ -155,7 +155,7 @@ export const faqs = [
   {
     question: "What happens when I create a video?",
     answer:
-      "UTubeAgent expands your idea into a script, creates illustrated shots, generates a voiceover, and assembles everything into an MP4. You can follow the progress as each step runs.",
+      "UtubeAgent expands your idea into a script, creates illustrated shots, generates a voiceover, and assembles everything into an MP4. You can follow the progress as each step runs.",
   },
   {
     question: "Can I download the individual files?",
@@ -262,7 +262,7 @@ export const legalCopy = {
     sections: [
       {
         heading: "Using the service",
-        body: "Use UTubeAgent lawfully and only with content you have permission to submit. You are responsible for the ideas, scripts, and other material you provide.",
+        body: "Use UtubeAgent lawfully and only with content you have permission to submit. You are responsible for the ideas, scripts, and other material you provide.",
       },
       {
         heading: "Generated content",
@@ -356,41 +356,41 @@ export const mediaContent = {
 
 export const pageSeo: Record<string, { title: string; description: string }> = {
   "/": {
-    title: "UTubeAgent — Your idea, made watchable",
+    title: "UtubeAgent — Your idea, made watchable",
     description: brand.description,
   },
   "/create": {
-    title: "Create a video — UTubeAgent",
+    title: "Create a video — UtubeAgent",
     description:
       "Turn a video idea into a script, illustrated scenes, voiceover, and a finished MP4.",
   },
   "/features": {
-    title: "Features — UTubeAgent",
+    title: "Features — UtubeAgent",
     description:
       "Explore the complete creative workflow, from story writing to downloadable video assets.",
   },
   "/pricing": {
-    title: "Pricing — UTubeAgent",
+    title: "Pricing — UtubeAgent",
     description:
-      "Explore UTubeAgent plans and start creating during the product preview.",
+      "Explore UtubeAgent plans and start creating during the product preview.",
   },
   "/faq": {
-    title: "Frequently asked questions — UTubeAgent",
+    title: "Frequently asked questions — UtubeAgent",
     description:
-      "Learn how UTubeAgent video generation, storage, and cancellation work.",
+      "Learn how UtubeAgent video generation, storage, and cancellation work.",
   },
   "/contact": {
-    title: "Contact — UTubeAgent",
+    title: "Contact — UtubeAgent",
     description:
-      "Get in touch with UTubeAgent about your questions, ideas, or feedback.",
+      "Get in touch with UtubeAgent about your questions, ideas, or feedback.",
   },
   "/privacy": {
-    title: "Privacy — UTubeAgent",
+    title: "Privacy — UtubeAgent",
     description:
-      "Read about video ideas, generated assets, and service credentials in UTubeAgent.",
+      "Read about video ideas, generated assets, and service credentials in UtubeAgent.",
   },
   "/terms": {
-    title: "Terms — UTubeAgent",
-    description: "Review the terms for using UTubeAgent and generated content.",
+    title: "Terms — UtubeAgent",
+    description: "Review the terms for using UtubeAgent and generated content.",
   },
 };

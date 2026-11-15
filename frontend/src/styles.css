@@ -201,16 +201,48 @@ textarea:focus-visible {
 
 .brand {
   display: inline-flex;
-  align-items: center;
   flex: none;
+  color: #17283d;
+  font-family: var(--font-display);
   text-decoration: none;
 }
 
-.brand-image {
-  display: block;
-  width: 224px;
-  height: auto;
-  object-fit: contain;
+.brand-wordmark {
+  display: grid;
+  gap: 3px;
+  align-content: center;
+}
+
+.brand-name {
+  display: inline-flex;
+  align-items: baseline;
+  font-size: 23px;
+  font-weight: 750;
+  letter-spacing: -0.07em;
+  line-height: 1;
+}
+
+.brand-u {
+  color: #e53935;
+}
+
+.brand-tube {
+  color: #171b23;
+}
+
+.brand-agent {
+  color: #2563eb;
+}
+
+.brand-tagline {
+  color: #65768c;
+  font-family: var(--font-body);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.17em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .desktop-nav {
@@ -3960,8 +3992,12 @@ textarea:focus-visible {
     height: 70px;
   }
 
-  .brand-image {
-    width: 190px;
+  .brand-name {
+    font-size: 20px;
+  }
+
+  .brand-tagline {
+    font-size: 6px;
   }
 
   .desktop-nav,

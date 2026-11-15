@@ -82,7 +82,7 @@ function usePageEffects() {
 
   useEffect(() => {
     const meta = pageSeo[location.pathname] ?? {
-      title: "Page not found — UTubeAgent",
+      title: "Page not found — UtubeAgent",
       description: brand.description,
     };
     document.title = meta.title;
@@ -134,13 +134,14 @@ function BrandLogo({ onClick }: { onClick?: () => void }) {
       aria-label={`${brand.name} home`}
       onClick={onClick}
     >
-      <img
-        className="brand-image"
-        src="/utube-agent-logo.png"
-        alt=""
-        width={2172}
-        height={724}
-      />
+      <span className="brand-wordmark">
+        <span className="brand-name" aria-hidden="true">
+          <span className="brand-u">U</span>
+          <span className="brand-tube">tube</span>
+          <span className="brand-agent">Agent</span>
+        </span>
+        <span className="brand-tagline">Create · Automate · Grow</span>
+      </span>
     </Link>
   );
 }

@@ -137,12 +137,13 @@ python app/server.py
 The server serves `frontend/dist` and falls back to the React app for direct
 visits to application routes such as `/features` and `/privacy`.
 
-### UTubeAgent loader
+### UtubeAgent loader
 
 The shared `UtubeAgentLoader` is an inline-SVG, CSS-only loader used by the
 initial page splash. Its five-second loop draws the red U, sends an orange
-particle around it, then runs a subtle blue pulse along the inner edge. It
-respects reduced-motion preferences.
+particle around it, then moves a blue energy pulse along the inner edge. The
+U stays visible through the cycle, and all animated elements are synchronized
+to the same five-second loop. It respects reduced-motion preferences.
 
 Reuse it in a component with:
 
@@ -162,6 +163,7 @@ function LoadingState() {
 ```
 
 `size` accepts `small`, `medium`, or `large`; `background` accepts
-`transparent` or `white`. Omit `progress` for an indeterminate animation or
-set `text={null}` to hide the loading message. The header and footer use the
-provided logo at `frontend/public/utube-agent-logo.png`.
+`transparent` or `white`. Omit `progress` for an indeterminate animation,
+set `showText={false}` to hide the loading message, or add `fullScreen` to
+center the loader in the viewport. The header and footer use a text wordmark
+styled in the brand's red, black, and blue.
