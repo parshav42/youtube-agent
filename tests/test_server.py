@@ -64,7 +64,7 @@ def test_health_endpoint_returns_ok() -> None:
             assert json.loads(response.read()) == {"status": "ok"}
 
 
-def test_video_job_generates_script_with_hugging_face_only(
+def test_video_job_uses_hugging_face_when_configured_even_if_ollama_is_selected(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -94,7 +94,8 @@ def test_video_job_generates_script_with_hugging_face_only(
         return FakeResponse()
 
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
-    monkeypatch.setenv("LLM_PROVIDER", "huggingface")
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
     monkeypatch.setenv("HF_TOKEN", "test-token")
     monkeypatch.setenv("HF_MODEL", "Qwen/Qwen3-4B-Instruct-2507")
     monkeypatch.setenv("HF_BASE_URL", "https://router.huggingface.co/v1")
@@ -141,7 +142,7 @@ def test_video_job_generates_script_with_hugging_face_only(
     assert len(requests_seen) == 1
     url, headers, payload, _timeout = requests_seen[0]
     assert url == "https://router.huggingface.co/v1/chat/completions"
-    assert "localhost" not in url
+    assert "localhost:11434" not in url
     assert headers == {"Authorization": "Bearer test-token"}
     assert payload["model"] == "Qwen/Qwen3-4B-Instruct-2507"
     assert job["status"] == "complete"

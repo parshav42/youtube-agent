@@ -51,10 +51,12 @@ HF_BASE_URL=https://router.huggingface.co/v1
 private; it is used only by the backend and must not be added to frontend
 configuration.
 The backend defaults to `LLM_PROVIDER=huggingface`; if `HF_TOKEN` is missing,
-generation fails explicitly instead of falling back to a local service. For
-local development only, set `LLM_PROVIDER=ollama` to opt in to Ollama and
-optionally configure `OLLAMA_BASE_URL` and `OLLAMA_MODEL`. Railway should keep
-`LLM_PROVIDER=huggingface` or leave it unset.
+generation fails explicitly instead of falling back to a local service. A
+configured `HF_TOKEN` selects Hugging Face even if `LLM_PROVIDER=ollama` is
+also set. For local development only, set `LLM_PROVIDER=ollama` without an
+`HF_TOKEN` to opt in to Ollama and optionally configure `OLLAMA_BASE_URL` and
+`OLLAMA_MODEL`. Railway should keep `LLM_PROVIDER=huggingface` or leave it
+unset.
 
 To persist video ideas, job progress, results, and generated files in Supabase:
 

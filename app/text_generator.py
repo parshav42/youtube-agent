@@ -124,6 +124,8 @@ class OllamaTextGenerator:
 
 def create_text_generator() -> TextGenerator:
     provider = os.getenv("LLM_PROVIDER", "huggingface").strip().lower()
+    if os.getenv("HF_TOKEN", "").strip():
+        provider = "huggingface"
     if provider == "huggingface":
         return HuggingFaceTextGenerator()
     if provider == "ollama":
