@@ -136,7 +136,19 @@ def test_video_api_validates_and_tracks_a_job(monkeypatch: pytest.MonkeyPatch) -
         )
         with urlopen(request, timeout=3) as response:
             assert response.status == 202
-            job_id = json.loads(response.read())["jobId"]
+            created_job = json.loads(response.read())
+            assert set(created_job) == {
+                "jobId",
+                "idea",
+                "status",
+                "stage",
+                "message",
+                "error",
+                "result",
+            }
+            assert created_job["idea"] == "A fox finds a hidden door."
+            assert created_job["status"] in {"queued", "complete"}
+            job_id = created_job["jobId"]
 
         assert job_finished.wait(timeout=3)
         with urlopen(f"{base_url}/api/jobs/{job_id}", timeout=3) as response:

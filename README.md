@@ -133,12 +133,11 @@ build the Vite app, publish `frontend/dist`, and serve React Router routes on
 direct visits. Import the repository with the **repository root** as the Vercel
 project root; do not set it to `frontend`.
 
-Set `VITE_API_URL` in the Vercel project's Environment Variables to the public
-base URL of the separately hosted API (for example,
-`https://api.example.com`, with no trailing slash). Set it for each Vercel
-environment you use, then redeploy so Vite can include it in the build. Without
-this value, the marketing pages deploy, but video generation cannot reach an
-API from Vercel.
+The Vercel build command in [`vercel.json`](vercel.json) sets `VITE_API_URL` to
+the production Railway API origin. This is public configuration, not a secret.
+If the Railway domain changes, update the URL in that build command and
+redeploy; do not add an `/api` suffix. For a non-Vercel frontend build, set
+`VITE_API_URL` to the API origin before building.
 
 ### Video-generation API
 
