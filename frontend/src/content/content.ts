@@ -47,7 +47,7 @@ export const steps = [
 ] as const;
 
 export const technologies = [
-  "Ollama",
+  "Hugging Face Inference Providers",
   "ElevenLabs",
   "FFmpeg",
   "Supabase",
@@ -270,7 +270,7 @@ export const legalCopy = {
       },
       {
         heading: "Third-party services",
-        body: "Video generation can rely on third-party services configured by the operator, including Ollama, ElevenLabs, FFmpeg, and optionally Supabase. Their availability and terms may apply.",
+        body: "Video generation can rely on third-party services configured by the operator, including Hugging Face Inference Providers, ElevenLabs, FFmpeg, and optionally Supabase. Their availability and terms may apply.",
       },
       {
         heading: "Availability",

@@ -2,45 +2,72 @@ import re
 from pathlib import Path
 
 import pytest
+import requests
 from elevenlabs import ElevenLabs
 from PIL import Image
 
 from app import video_generator
 from app.image_generator import create_image
 from app.image_prompt_generator import LocalImagePromptGenerator
-from app.text_generator import OllamaTextGenerator
+from app.text_generator import HuggingFaceTextGenerator
 
 
-def test_ollama_text_generator_returns_generated_dialogue(
+def test_hugging_face_text_generator_parses_chat_completion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeResponse:
         def raise_for_status(self) -> None:
             pass
 
-        def json(self) -> dict[str, str]:
-            return {"response": "A generated story."}
+        def json(self) -> dict[str, object]:
+            return {
+                "choices": [
+                    {"message": {"role": "assistant", "content": " A generated story. "}}
+                ]
+            }
 
-    requests: list[tuple[str, dict[str, object], int]] = []
+    requests: list[tuple[str, dict[str, str], dict[str, object], int]] = []
 
     def fake_post(
         url: str,
+        headers: dict[str, str],
         json: dict[str, object],
         timeout: int,
     ) -> FakeResponse:
-        requests.append((url, json, timeout))
+        requests.append((url, headers, json, timeout))
         return FakeResponse()
 
     monkeypatch.setattr("app.text_generator.requests.post", fake_post)
-    monkeypatch.setenv("OLLAMA_MODEL", "test-model")
-    generator = OllamaTextGenerator()
+    monkeypatch.setenv("HF_TOKEN", "test-token")
+    monkeypatch.setenv("HF_MODEL", "test-model")
+    monkeypatch.setenv("HF_BASE_URL", "https://inference.example/v1/")
+    generator = HuggingFaceTextGenerator()
 
     dialogue = generator.generate_dialogue("A fox finds a hidden door.")
 
     assert dialogue == "A generated story."
-    assert requests[0][0] == "http://localhost:11434/api/generate"
-    assert requests[0][1]["model"] == "test-model"
-    assert "A fox finds a hidden door." in requests[0][1]["prompt"]
+    assert requests[0][0] == "https://inference.example/v1/chat/completions"
+    assert requests[0][1] == {"Authorization": "Bearer test-token"}
+    assert requests[0][2]["model"] == "test-model"
+    assert requests[0][2]["stream"] is False
+    messages = requests[0][2]["messages"]
+    assert isinstance(messages, list)
+    assert messages[0]["role"] == "user"
+    assert "A fox finds a hidden door." in messages[0]["content"]
+    assert requests[0][3] == 180
+
+
+def test_hugging_face_text_generator_uses_requested_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HF_TOKEN", "test-token")
+    monkeypatch.delenv("HF_MODEL", raising=False)
+    monkeypatch.delenv("HF_BASE_URL", raising=False)
+
+    generator = HuggingFaceTextGenerator()
+
+    assert generator.model == "Qwen/Qwen3-4B-Instruct-2507"
+    assert generator.base_url == "https://router.huggingface.co/v1"
 
 
 def test_create_image_writes_repeatable_prompt_sized_png(tmp_path: Path) -> None:
@@ -76,9 +103,39 @@ def test_local_prompt_generator_formats_story_segment() -> None:
     assert "16:9" in image_prompt
 
 
-def test_ollama_text_generator_rejects_empty_video_idea() -> None:
+def test_hugging_face_text_generator_requires_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+
+    with pytest.raises(RuntimeError, match="Missing HF_TOKEN"):
+        HuggingFaceTextGenerator()
+
+
+def test_hugging_face_text_generator_does_not_expose_token_in_request_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = "private-test-token"
+    monkeypatch.setenv("HF_TOKEN", token)
+
+    def fake_post(*_args: object, **_kwargs: object) -> None:
+        raise requests.ConnectionError(f"request failed with {token}")
+
+    monkeypatch.setattr("app.text_generator.requests.post", fake_post)
+    generator = HuggingFaceTextGenerator()
+
+    with pytest.raises(RuntimeError, match="Hugging Face inference request failed") as error:
+        generator.generate_dialogue("A fox finds a hidden door.")
+
+    assert token not in str(error.value)
+
+
+def test_hugging_face_text_generator_rejects_empty_video_idea(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HF_TOKEN", "test-token")
     with pytest.raises(ValueError, match="Video idea cannot be empty"):
-        OllamaTextGenerator().generate_dialogue("  ")
+        HuggingFaceTextGenerator().generate_dialogue("  ")
 
 
 def test_create_video_stores_images_and_sends_generated_dialogue_to_speech(

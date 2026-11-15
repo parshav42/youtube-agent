@@ -10,12 +10,12 @@ from elevenlabs.core.api_error import ApiError
 if __package__:
     from .image_prompt_generator import LocalImagePromptGenerator
     from .supabase_store import StoredVideoJob, StoredVideoResult, SupabaseStore
-    from .text_generator import OllamaTextGenerator
+    from .text_generator import HuggingFaceTextGenerator
     from .video_generator import create_video
 else:
     from image_prompt_generator import LocalImagePromptGenerator
     from supabase_store import StoredVideoJob, StoredVideoResult, SupabaseStore
-    from text_generator import OllamaTextGenerator
+    from text_generator import HuggingFaceTextGenerator
     from video_generator import create_video
 
 
@@ -60,7 +60,7 @@ def main() -> None:
             client=client,
             output_dir=project_root / "output",
             image_prompt_generator=LocalImagePromptGenerator(),
-            text_generator=OllamaTextGenerator(),
+            text_generator=HuggingFaceTextGenerator(),
             progress_callback=report_progress,
         )
         if store is not None:

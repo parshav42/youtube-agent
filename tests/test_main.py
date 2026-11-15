@@ -15,6 +15,7 @@ def test_cli_saves_generated_video_to_supabase(
     monkeypatch.setattr(app_main, "__file__", str(project_root / "app" / "main.py"))
     monkeypatch.setattr(app_main, "load_dotenv", lambda *_args: None)
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
+    monkeypatch.setenv("HF_TOKEN", "test-token")
     monkeypatch.setattr("builtins.input", lambda _prompt: "A story")
     monkeypatch.setattr(app_main, "ElevenLabs", lambda **_kwargs: object())
 

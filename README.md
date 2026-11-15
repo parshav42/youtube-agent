@@ -5,17 +5,16 @@ story aloud, and the app creates deterministic, locally illustrated scene
 images from each narration segment. It overlays the text and assembles the
 images with the narration using FFmpeg. The current image generator is a local
 Pillow-based implementation; it does not use an image-generation API.
-The story is expanded into a coherent narration/dialogue by a local Ollama
-model before being sent to ElevenLabs. The generated script is split into
-segments; a local prompt builder creates a visual description for each
-illustration.
+The story is expanded into a coherent narration/dialogue by Hugging Face
+Inference Providers before being sent to ElevenLabs. The generated script is
+split into segments; a local prompt builder creates a visual description for
+each illustration.
 
 ## Requirements
 
 - Python 3.10+
 - Node.js 18+ and npm
-- [Ollama](https://ollama.com/) with the `qwen3:1.7b` model (or set
-  `OLLAMA_MODEL` to another installed model)
+- A Hugging Face token with Inference Providers access
 - [ElevenLabs API key](https://elevenlabs.io/) with Text to Speech access
 - FFmpeg and `ffprobe`
 
@@ -40,9 +39,17 @@ On Windows, activate the environment with:
 The app loads `.env` and reads `ELEVENLABS_API_KEY`. The ElevenLabs onboarding
 CLI can configure this key. Optionally set `ELEVENLABS_VOICE_ID` to a voice ID
 available to your account; otherwise, the app uses the first available voice.
-Ollama must be running locally. Optionally set `OLLAMA_BASE_URL` (defaults to
-`http://localhost:11434`) and `OLLAMA_MODEL` (defaults to `qwen3:1.7b`) in
-`.env`.
+Configure Hugging Face Inference Providers in `.env`:
+
+```dotenv
+HF_TOKEN=your-server-only-token
+HF_MODEL=Qwen/Qwen3-4B-Instruct-2507
+HF_BASE_URL=https://router.huggingface.co/v1
+```
+
+`HF_MODEL` and `HF_BASE_URL` default to the values above. Keep `HF_TOKEN`
+private; it is used only by the backend and must not be added to frontend
+configuration.
 
 To persist video ideas, job progress, results, and generated files in Supabase:
 
@@ -73,11 +80,11 @@ python app/server.py
 ```
 
 Open `http://127.0.0.1:8000`, enter a video idea, and click **Create video**.
-The page shows progress as Ollama writes the script, images are generated,
+The page shows progress as Hugging Face writes the script, images are generated,
 ElevenLabs creates speech, and FFmpeg assembles the final video. Play or
 download the result from the page. Click **Stop** during generation to cancel
 the current job; FFmpeg is terminated if it is assembling the video. An active
-Ollama, ElevenLabs, or Supabase request may finish before cancellation is
+Hugging Face, ElevenLabs, or Supabase request may finish before cancellation is
 handled. For frontend development, run the API in one terminal with
 `python app/server.py`, then run
 `npm --prefix frontend run dev` in another terminal and open
@@ -145,10 +152,11 @@ the API's `CORS_ALLOWED_ORIGINS`.
 
 Vercel hosts the static website, not this repository's Python video-generation
 server. The API uses a long-running HTTP server, background threads, FFmpeg,
-Ollama, and generated-file storage, so it must run separately on a persistent
-Python/container host. The root [`Dockerfile`](Dockerfile) builds the frontend
-with `npm --prefix frontend run build`, then packages `frontend/dist` alongside
-the API, Python dependencies, and FFmpeg. Create a Docker web service from the
+Hugging Face Inference Providers, and generated-file storage, so it must run
+separately on a persistent Python/container host. The root
+[`Dockerfile`](Dockerfile) builds the frontend with
+`npm --prefix frontend run build`, then packages `frontend/dist` alongside the
+API, Python dependencies, and FFmpeg. Create a Docker web service from the
 repository root, expose the port assigned by the host, and use `/health` as its
 health-check path if supported.
 
@@ -161,10 +169,12 @@ set a separate frontend build command or put credentials in Docker build
 arguments; configure server credentials as Railway service variables instead.
 Railway's assigned `PORT` is used by the server, which binds to `0.0.0.0`.
 Configure `/health` as the health-check path if desired. Set the runtime
-variables below, including an Ollama URL reachable from Railway:
+variables below. Keep the Hugging Face token in Railway's server-side variables:
 
 ```dotenv
-OLLAMA_BASE_URL=https://your-reachable-ollama-host
+HF_TOKEN=your-server-only-token
+HF_MODEL=Qwen/Qwen3-4B-Instruct-2507
+HF_BASE_URL=https://router.huggingface.co/v1
 ELEVENLABS_API_KEY=your-server-only-key
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SECRET_KEY=your-server-only-key
@@ -174,25 +184,26 @@ If a separately hosted frontend calls the API directly instead of using the
 Vercel same-origin proxy, set `CORS_ALLOWED_ORIGINS` on the API service.
 
 ```dotenv
-OLLAMA_BASE_URL=https://your-reachable-ollama-host
+HF_TOKEN=your-server-only-token
+HF_MODEL=Qwen/Qwen3-4B-Instruct-2507
+HF_BASE_URL=https://router.huggingface.co/v1
 ELEVENLABS_API_KEY=your-server-only-key
 CORS_ALLOWED_ORIGINS=https://your-project.vercel.app,https://www.your-domain.com
 ```
 
 The Docker image listens on `0.0.0.0` and uses the `PORT` supplied by the
-hosting service. `OLLAMA_BASE_URL` must be reachable from that service; do not
-use `localhost` unless Ollama is running in the same container. Set
-`SUPABASE_URL` and `SUPABASE_SECRET_KEY` on the API host for persistent jobs and
-assets, after applying [`supabase/schema.sql`](supabase/schema.sql).
+hosting service. Set `SUPABASE_URL` and `SUPABASE_SECRET_KEY` on the API host
+for persistent jobs and assets, after applying
+[`supabase/schema.sql`](supabase/schema.sql).
 
 For browser clients that call the API directly, add their exact origins to
 `CORS_ALLOWED_ORIGINS` (no paths); preview deployments need their own origins
 if they should access the API. The Vercel same-origin proxy does not require
 CORS. CORS is disabled by default and does not replace API authentication or
 rate limiting.
-Protect the generation endpoint before making a paid-provider-backed API
-public. Keep `ELEVENLABS_API_KEY` and Supabase service credentials on the API
-host only, never in Vercel's `VITE_*` variables. For cloud hosting, configure
+Protect the generation endpoint before making a provider-backed API public.
+Keep `HF_TOKEN`, `ELEVENLABS_API_KEY`, and Supabase service credentials on the
+API host only, never in Vercel's `VITE_*` variables. For cloud hosting, configure
 Supabase or another persistent/shared asset store rather than relying on
 ephemeral local output files.
 
