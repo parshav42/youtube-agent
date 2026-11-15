@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from app import server
+from app import server, video_generator
 
 
 @contextmanager
@@ -62,6 +62,92 @@ def test_health_endpoint_returns_ok() -> None:
         with urlopen(f"{base_url}/health", timeout=3) as response:
             assert response.status == 200
             assert json.loads(response.read()) == {"status": "ok"}
+
+
+def test_video_job_generates_script_with_hugging_face_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job_id = "hugging-face-provider-job"
+    idea = "A fox finds a hidden door."
+    dialogue = "A fox discovers a hidden door beneath an old tree."
+    requests_seen: list[tuple[str, dict[str, str], dict[str, object], int]] = []
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict[str, object]:
+            return {
+                "choices": [
+                    {"message": {"role": "assistant", "content": dialogue}}
+                ]
+            }
+
+    def fake_post(
+        url: str,
+        headers: dict[str, str],
+        json: dict[str, object],
+        timeout: int,
+    ) -> FakeResponse:
+        requests_seen.append((url, headers, json, timeout))
+        return FakeResponse()
+
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
+    monkeypatch.setenv("HF_TOKEN", "test-token")
+    monkeypatch.setenv("HF_MODEL", "Qwen/Qwen3-4B-Instruct-2507")
+    monkeypatch.setenv("HF_BASE_URL", "https://router.huggingface.co/v1")
+    monkeypatch.setattr("app.text_generator.requests.post", fake_post)
+    monkeypatch.setattr(server, "OUTPUT_ROOT", tmp_path)
+    monkeypatch.setattr(server, "ElevenLabs", lambda **_kwargs: object())
+    monkeypatch.setattr(
+        server.SupabaseStore,
+        "from_env",
+        classmethod(lambda _cls: None),
+    )
+    monkeypatch.setattr(video_generator.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(video_generator, "_create_title_card", lambda *_args: None)
+    monkeypatch.setattr(
+        video_generator,
+        "create_image",
+        lambda _prompt, path: path.write_bytes(b"image"),
+    )
+    monkeypatch.setattr(
+        video_generator,
+        "_generate_narration",
+        lambda _text, _client, path, _cancel=None: path.write_bytes(b"audio"),
+    )
+    monkeypatch.setattr(video_generator, "_assemble_video", lambda *_args: None)
+
+    job: server.VideoJob = {
+        "jobId": job_id,
+        "idea": idea,
+        "status": "running",
+        "stage": "dialogue",
+        "message": "Writing the script...",
+        "error": None,
+        "result": None,
+    }
+    monkeypatch.setitem(server._JOBS, job_id, job)
+    monkeypatch.setitem(
+        server._JOB_CONTROLS,
+        job_id,
+        server.JobControl(threading.Event(), threading.Lock()),
+    )
+
+    server._run_video_job(job_id, idea)
+
+    assert len(requests_seen) == 1
+    url, headers, payload, _timeout = requests_seen[0]
+    assert url == "https://router.huggingface.co/v1/chat/completions"
+    assert "localhost" not in url
+    assert headers == {"Authorization": "Bearer test-token"}
+    assert payload["model"] == "Qwen/Qwen3-4B-Instruct-2507"
+    assert job["status"] == "complete"
+    result = job["result"]
+    assert result is not None
+    dialogue_path = tmp_path / result["outputFolder"] / "dialogue.txt"
+    assert dialogue_path.read_text(encoding="utf-8").strip() == dialogue
 
 
 def test_main_prefers_railway_port(
