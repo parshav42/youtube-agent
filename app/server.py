@@ -342,6 +342,10 @@ class VideoRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         request_path = urlsplit(self.path).path
+        if request_path == "/health":
+            self._send_json(200, {"status": "ok"})
+            return
+
         if request_path.startswith("/api/jobs/"):
             job_id = request_path.removeprefix("/api/jobs/")
             try:

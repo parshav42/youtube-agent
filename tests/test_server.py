@@ -57,6 +57,13 @@ def test_video_api_allows_preflight_only_for_configured_origins(
         assert error.value.code == 403
 
 
+def test_health_endpoint_returns_ok() -> None:
+    with _running_server() as base_url:
+        with urlopen(f"{base_url}/health", timeout=3) as response:
+            assert response.status == 200
+            assert json.loads(response.read()) == {"status": "ok"}
+
+
 def test_video_api_validates_and_tracks_a_job(monkeypatch: pytest.MonkeyPatch) -> None:
     job_finished = threading.Event()
     created_ideas: list[str] = []
