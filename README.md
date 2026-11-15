@@ -145,25 +145,36 @@ API from Vercel.
 Vercel hosts the static website, not this repository's Python video-generation
 server. The API uses a long-running HTTP server, background threads, FFmpeg,
 Ollama, and generated-file storage, so it must run separately on a persistent
-Python/container host. Configure that host with the required Python packages
-and FFmpeg, and set:
+Python/container host. The root [`Dockerfile`](Dockerfile) packages the API
+with Python and FFmpeg. Create a Docker web service from the repository root,
+expose the port assigned by the host, and use `/health` as its health-check path
+if supported.
 
 ```dotenv
-APP_HOST=0.0.0.0
-PORT=8000
 OLLAMA_BASE_URL=https://your-reachable-ollama-host
+ELEVENLABS_API_KEY=your-server-only-key
 CORS_ALLOWED_ORIGINS=https://your-project.vercel.app,https://www.your-domain.com
 ```
 
-Use the port assigned by your hosting provider. Add the exact Vercel production
-and custom-domain origins to `CORS_ALLOWED_ORIGINS` (no paths); preview
-deployments need their own origins if they should access the API. CORS is
+The Docker image listens on `0.0.0.0` and uses the `PORT` supplied by the
+hosting service. `OLLAMA_BASE_URL` must be reachable from that service; do not
+use `localhost` unless Ollama is running in the same container. Set
+`SUPABASE_URL` and `SUPABASE_SECRET_KEY` on the API host for persistent jobs and
+assets, after applying [`supabase/schema.sql`](supabase/schema.sql).
+
+Add the exact Vercel production and custom-domain origins to
+`CORS_ALLOWED_ORIGINS` (no paths); preview deployments need their own origins
+if they should access the API. CORS is
 disabled by default and does not replace API authentication or rate limiting.
 Protect the generation endpoint before making a paid-provider-backed API
 public. Keep `ELEVENLABS_API_KEY` and Supabase service credentials on the API
 host only, never in Vercel's `VITE_*` variables. For cloud hosting, configure
 Supabase or another persistent/shared asset store rather than relying on
 ephemeral local output files.
+
+After the API deploys, copy its public base URL into Vercel as `VITE_API_URL`
+and redeploy the frontend. The URL should be the API origin only, for example
+`https://your-api.example.com`, with no `/api` suffix.
 
 For a self-hosted deployment that serves both the static frontend and API from
 the same process, build the frontend and run the Python server:
