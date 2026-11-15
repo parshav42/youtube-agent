@@ -2,7 +2,17 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "installCommand": "npm --prefix frontend ci",
-  "buildCommand": "VITE_API_URL=https://youtube-agent-production-ddb0e397.up.railway.app npm --prefix frontend run build",
+  "buildCommand": "npm --prefix frontend run build",
   "outputDirectory": "frontend/dist",
-  "rewrites": [{ "source": "/(.*)", "destination": "/" }]
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://youtube-agent-production-ddb0e397.up.railway.app/api/$1"
+    },
+    {
+      "source": "/output/(.*)",
+      "destination": "https://youtube-agent-production-ddb0e397.up.railway.app/output/$1"
+    },
+    { "source": "/(.*)", "destination": "/" }
+  ]
 }

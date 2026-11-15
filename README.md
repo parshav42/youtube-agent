@@ -133,11 +133,12 @@ build the Vite app, publish `frontend/dist`, and serve React Router routes on
 direct visits. Import the repository with the **repository root** as the Vercel
 project root; do not set it to `frontend`.
 
-The Vercel build command in [`vercel.json`](vercel.json) sets `VITE_API_URL` to
-the production Railway API origin. This is public configuration, not a secret.
-If the Railway domain changes, update the URL in that build command and
-redeploy; do not add an `/api` suffix. For a non-Vercel frontend build, set
-`VITE_API_URL` to the API origin before building.
+The rewrites in [`vercel.json`](vercel.json) proxy `/api` and `/output` requests
+to the production Railway API, keeping browser requests on the Vercel origin.
+If the Railway domain changes, update both rewrite destinations and redeploy.
+For a frontend hosted elsewhere, set `VITE_API_URL` to the API origin before
+building; that direct cross-origin setup also requires the frontend origin in
+the API's `CORS_ALLOWED_ORIGINS`.
 
 ### Video-generation API
 
@@ -168,8 +169,8 @@ SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SECRET_KEY=your-server-only-key
 ```
 
-If the frontend is hosted separately, continue to use the Vercel setup below
-and set `CORS_ALLOWED_ORIGINS` on the API service as described there.
+If a separately hosted frontend calls the API directly instead of using the
+Vercel same-origin proxy, set `CORS_ALLOWED_ORIGINS` on the API service.
 
 ```dotenv
 OLLAMA_BASE_URL=https://your-reachable-ollama-host
@@ -183,19 +184,19 @@ use `localhost` unless Ollama is running in the same container. Set
 `SUPABASE_URL` and `SUPABASE_SECRET_KEY` on the API host for persistent jobs and
 assets, after applying [`supabase/schema.sql`](supabase/schema.sql).
 
-Add the exact Vercel production and custom-domain origins to
+For browser clients that call the API directly, add their exact origins to
 `CORS_ALLOWED_ORIGINS` (no paths); preview deployments need their own origins
-if they should access the API. CORS is
-disabled by default and does not replace API authentication or rate limiting.
+if they should access the API. The Vercel same-origin proxy does not require
+CORS. CORS is disabled by default and does not replace API authentication or
+rate limiting.
 Protect the generation endpoint before making a paid-provider-backed API
 public. Keep `ELEVENLABS_API_KEY` and Supabase service credentials on the API
 host only, never in Vercel's `VITE_*` variables. For cloud hosting, configure
 Supabase or another persistent/shared asset store rather than relying on
 ephemeral local output files.
 
-After the API deploys, copy its public base URL into Vercel as `VITE_API_URL`
-and redeploy the frontend. The URL should be the API origin only, for example
-`https://your-api.example.com`, with no `/api` suffix.
+After the API deploys, update the Vercel rewrite destinations to its public
+base URL and redeploy the frontend.
 
 For a self-hosted deployment that serves both the static frontend and API from
 the same process, build the frontend and run the Python server:
