@@ -64,6 +64,35 @@ def test_health_endpoint_returns_ok() -> None:
             assert json.loads(response.read()) == {"status": "ok"}
 
 
+def test_main_prefers_railway_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server_address: list[tuple[str, int]] = []
+
+    class FakeHTTPServer:
+        def __init__(self, address: tuple[str, int], _handler: type) -> None:
+            server_address.append(address)
+
+        def __enter__(self) -> "FakeHTTPServer":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+        def serve_forever(self) -> None:
+            pass
+
+    monkeypatch.setattr(server, "ThreadingHTTPServer", FakeHTTPServer)
+    monkeypatch.setattr(server, "load_dotenv", lambda _path: None)
+    monkeypatch.setenv("APP_HOST", "0.0.0.0")
+    monkeypatch.setenv("PORT", "12345")
+    monkeypatch.setenv("APP_PORT", "8000")
+
+    server.main()
+
+    assert server_address == [("0.0.0.0", 12345)]
+
+
 def test_video_api_validates_and_tracks_a_job(monkeypatch: pytest.MonkeyPatch) -> None:
     job_finished = threading.Event()
     created_ideas: list[str] = []

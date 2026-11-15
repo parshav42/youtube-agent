@@ -465,7 +465,7 @@ class VideoRequestHandler(BaseHTTPRequestHandler):
 def main() -> None:
     load_dotenv(PROJECT_ROOT / ".env")
     host = os.getenv("APP_HOST", "127.0.0.1")
-    port = int(os.getenv("APP_PORT", os.getenv("PORT", "8000")))
+    port = int(os.getenv("PORT", os.getenv("APP_PORT", "8000")))
     with ThreadingHTTPServer((host, port), VideoRequestHandler) as server:
         print(f"Video generator ready at http://{host}:{port}", flush=True)
         server.serve_forever()

@@ -145,10 +145,32 @@ API from Vercel.
 Vercel hosts the static website, not this repository's Python video-generation
 server. The API uses a long-running HTTP server, background threads, FFmpeg,
 Ollama, and generated-file storage, so it must run separately on a persistent
-Python/container host. The root [`Dockerfile`](Dockerfile) packages the API
-with Python and FFmpeg. Create a Docker web service from the repository root,
-expose the port assigned by the host, and use `/health` as its health-check path
-if supported.
+Python/container host. The root [`Dockerfile`](Dockerfile) builds the frontend
+with `npm --prefix frontend run build`, then packages `frontend/dist` alongside
+the API, Python dependencies, and FFmpeg. Create a Docker web service from the
+repository root, expose the port assigned by the host, and use `/health` as its
+health-check path if supported.
+
+#### Deploying the full app on Railway
+
+Create a Railway service from this repository and select the root
+[`Dockerfile`](Dockerfile) as its builder. Railway will build the frontend into
+the image and run the Python server, which serves both the site and API. Do not
+set a separate frontend build command or put credentials in Docker build
+arguments; configure server credentials as Railway service variables instead.
+Railway's assigned `PORT` is used by the server, which binds to `0.0.0.0`.
+Configure `/health` as the health-check path if desired. Set the runtime
+variables below, including an Ollama URL reachable from Railway:
+
+```dotenv
+OLLAMA_BASE_URL=https://your-reachable-ollama-host
+ELEVENLABS_API_KEY=your-server-only-key
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SECRET_KEY=your-server-only-key
+```
+
+If the frontend is hosted separately, continue to use the Vercel setup below
+and set `CORS_ALLOWED_ORIGINS` on the API service as described there.
 
 ```dotenv
 OLLAMA_BASE_URL=https://your-reachable-ollama-host
