@@ -1,0 +1,209 @@
+import json
+import threading
+from contextlib import contextmanager
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+from typing import Iterator
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+import pytest
+
+from app import server
+
+
+@contextmanager
+def _running_server() -> Iterator[str]:
+    http_server = ThreadingHTTPServer(("127.0.0.1", 0), server.VideoRequestHandler)
+    thread = threading.Thread(target=http_server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{http_server.server_port}"
+    finally:
+        http_server.shutdown()
+        thread.join(timeout=2)
+        http_server.server_close()
+
+
+def test_video_api_validates_and_tracks_a_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    job_finished = threading.Event()
+    created_ideas: list[str] = []
+
+    def fake_run_job(job_id: str, idea: str) -> None:
+        created_ideas.append(idea)
+        result: server.VideoResult = {
+            "videoUrl": "/output/video.mp4",
+            "dialogueUrl": "/output/dialogue.txt",
+            "audioUrl": "/output/narration.mp3",
+            "imageUrls": ["/output/images/shot_001.png"],
+            "outputFolder": "2026-01-01/video",
+        }
+        server._update_job(
+            job_id,
+            status="complete",
+            stage="complete",
+            message="Video ready.",
+            result=result,
+        )
+        job_finished.set()
+
+    monkeypatch.setattr(server, "_run_video_job", fake_run_job)
+
+    with _running_server() as base_url:
+        invalid_request = Request(
+            f"{base_url}/api/videos",
+            data=b'{"idea":"  "}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as error:
+            urlopen(invalid_request, timeout=3)
+        assert error.value.code == 400
+
+        request = Request(
+            f"{base_url}/api/videos",
+            data=json.dumps({"idea": "A fox finds a hidden door."}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request, timeout=3) as response:
+            assert response.status == 202
+            job_id = json.loads(response.read())["jobId"]
+
+        assert job_finished.wait(timeout=3)
+        with urlopen(f"{base_url}/api/jobs/{job_id}", timeout=3) as response:
+            job = json.loads(response.read())
+
+    assert created_ideas == ["A fox finds a hidden door."]
+    assert job["status"] == "complete"
+    assert job["result"]["videoUrl"] == "/output/video.mp4"
+
+
+def test_video_api_cancels_an_active_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    job_started = threading.Event()
+    job_finished = threading.Event()
+    for key in (
+        "SUPABASE_URL",
+        "supabase_url",
+        "SUPABASE_SECRET_KEY",
+        "supabase_sec",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SUPABASE_PUBLISHABLE_KEY",
+        "supabase_pub",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    def fake_run_job(job_id: str, _idea: str) -> None:
+        job_started.set()
+        server._JOB_CONTROLS[job_id].cancel_event.wait(timeout=3)
+        server._update_job(
+            job_id,
+            status="cancelled",
+            stage="cancelled",
+            message="Video generation stopped.",
+        )
+        job_finished.set()
+
+    monkeypatch.setattr(server, "_run_video_job", fake_run_job)
+
+    with _running_server() as base_url:
+        request = Request(
+            f"{base_url}/api/videos",
+            data=json.dumps({"idea": "A story to cancel"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request, timeout=3) as response:
+            job_id = json.loads(response.read())["jobId"]
+
+        assert job_started.wait(timeout=3)
+        cancel_request = Request(
+            f"{base_url}/api/jobs/{job_id}/cancel",
+            data=b"",
+            method="POST",
+        )
+        with urlopen(cancel_request, timeout=3) as response:
+            assert response.status == 202
+            assert json.loads(response.read())["status"] == "cancelling"
+
+        assert job_finished.wait(timeout=3)
+        with urlopen(f"{base_url}/api/jobs/{job_id}", timeout=3) as response:
+            job = json.loads(response.read())
+
+    assert job["status"] == "cancelled"
+
+
+def test_output_server_supports_video_byte_ranges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    video_path = tmp_path / "sample.mp4"
+    video_path.write_bytes(b"abcdef")
+    monkeypatch.setattr(server, "OUTPUT_ROOT", tmp_path)
+
+    with _running_server() as base_url:
+        request = Request(
+            f"{base_url}/output/sample.mp4",
+            headers={"Range": "bytes=1-3"},
+        )
+        with urlopen(request, timeout=3) as response:
+            assert response.status == 206
+            assert response.headers["Content-Range"] == "bytes 1-3/6"
+            assert response.read() == b"bcd"
+
+
+def test_job_api_restores_persisted_supabase_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job: server.VideoJob = {
+        "jobId": "restored-job",
+        "idea": "A story from yesterday.",
+        "status": "complete",
+        "stage": "complete",
+        "message": "Your video is ready.",
+        "error": None,
+        "result": {
+            "videoUrl": "supabase://video-assets/restored-job/video.mp4",
+            "dialogueUrl": "supabase://video-assets/restored-job/dialogue.txt",
+            "audioUrl": "supabase://video-assets/restored-job/narration.mp3",
+            "imageUrls": ["supabase://video-assets/restored-job/images/shot_001.png"],
+            "outputFolder": "2026-01-01/video",
+        },
+    }
+
+    class FakeStore:
+        def get_job(self, job_id: str) -> server.VideoJob | None:
+            return job if job_id == job["jobId"] else None
+
+        def signed_url(self, storage_reference: str) -> str:
+            return f"https://signed.example/{storage_reference.rsplit('/', 1)[-1]}"
+
+    monkeypatch.setattr(
+        server.SupabaseStore,
+        "from_env",
+        classmethod(lambda cls: FakeStore()),
+    )
+
+    with _running_server() as base_url:
+        with urlopen(f"{base_url}/api/jobs/restored-job", timeout=3) as response:
+            restored_job = json.loads(response.read())
+
+    assert restored_job["idea"] == "A story from yesterday."
+    assert restored_job["result"]["videoUrl"] == "https://signed.example/video.mp4"
+
+
+def test_frontend_routes_fall_back_to_the_spa_shell(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "index.html").write_text("<main>youtubeAgent</main>", encoding="utf-8")
+    monkeypatch.setattr(server, "FRONTEND_ROOT", tmp_path)
+
+    with _running_server() as base_url:
+        with urlopen(f"{base_url}/features", timeout=3) as response:
+            assert response.status == 200
+            assert response.read() == b"<main>youtubeAgent</main>"
+
+        with pytest.raises(HTTPError) as error:
+            urlopen(f"{base_url}/assets/missing.js", timeout=3)
+        assert error.value.code == 404
