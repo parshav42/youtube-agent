@@ -3053,6 +3053,51 @@ textarea:focus-visible {
   opacity: 0.65;
 }
 
+.idea-examples {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.idea-examples-label {
+  color: var(--color-text-muted);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.idea-example-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.idea-example-button {
+  min-height: 29px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-pill);
+  background: rgba(65, 159, 190, 0.07);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.idea-example-button:hover:not(:disabled) {
+  border-color: var(--color-cyan);
+  background: rgba(65, 159, 190, 0.13);
+  color: var(--color-text);
+}
+
+.idea-example-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .input-meta {
   display: flex;
   justify-content: space-between;

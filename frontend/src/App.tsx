@@ -929,6 +929,24 @@ function HomePage() {
   );
 }
 
+const examplePrompts = [
+  {
+    label: "Robot on Mars",
+    prompt:
+      "A shy robot discovers a tiny garden growing on Mars and decides to protect it.",
+  },
+  {
+    label: "Lighthouse mystery",
+    prompt:
+      "A lighthouse keeper follows a glowing message across a stormy sea to find a lost ship.",
+  },
+  {
+    label: "Music in the city",
+    prompt:
+      "A street musician discovers that one melody can make a gray city bloom with color.",
+  },
+];
+
 function Generator({ compact = false }: { compact?: boolean }) {
   const [idea, setIdea] = useState("");
   const { job, active, submitting, stopping, error, create, stop } = useJob();
@@ -975,6 +993,22 @@ function Generator({ compact = false }: { compact?: boolean }) {
               {idea.length.toLocaleString()}
               <i> / 12,000</i>
             </span>
+          </div>
+          <div className="idea-examples">
+            <span className="idea-examples-label">Try an example</span>
+            <div className="idea-example-list">
+              {examplePrompts.map((example) => (
+                <button
+                  className="idea-example-button"
+                  key={example.label}
+                  type="button"
+                  onClick={() => setIdea(example.prompt)}
+                  disabled={busy}
+                >
+                  {example.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="generator-actions">
             <Button type="submit" disabled={busy || !idea.trim()}>
