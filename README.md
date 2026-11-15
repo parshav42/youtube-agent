@@ -133,9 +133,10 @@ build the Vite app, publish `frontend/dist`, and serve React Router routes on
 direct visits. Import the repository with the **repository root** as the Vercel
 project root; do not set it to `frontend`.
 
-The rewrites in [`vercel.json`](vercel.json) proxy `/api` and `/output` requests
-to the production Railway API, keeping browser requests on the Vercel origin.
-If the Railway domain changes, update both rewrite destinations and redeploy.
+The Vercel build clears `VITE_API_URL`, and the rewrites in
+[`vercel.json`](vercel.json) proxy `/api` and `/output` requests to the
+production Railway API, keeping browser requests on the Vercel origin. If the
+Railway domain changes, update both rewrite destinations and redeploy.
 For a frontend hosted elsewhere, set `VITE_API_URL` to the API origin before
 building; that direct cross-origin setup also requires the frontend origin in
 the API's `CORS_ALLOWED_ORIGINS`.
