@@ -49,8 +49,11 @@ class HuggingFaceTextGenerator:
                 timeout=180,
             )
             response.raise_for_status()
-        except requests.RequestException:
-            raise RuntimeError("Hugging Face inference request failed.") from None
+        except requests.RequestException as error:
+            detail = str(error).replace(self.token, "[redacted]")
+            raise RuntimeError(
+                f"Hugging Face inference request failed: {detail}"
+            ) from None
 
         payload = response.json()
         choices = payload.get("choices") if isinstance(payload, dict) else None
