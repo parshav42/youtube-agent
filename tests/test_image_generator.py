@@ -350,7 +350,6 @@ def test_create_video_stores_images_and_sends_generated_dialogue_to_speech(
             return output_path
 
     monkeypatch.setattr(video_generator.shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(video_generator, "_create_title_card", lambda *_args: None)
     monkeypatch.setattr(
         video_generator,
         "_generate_narration",

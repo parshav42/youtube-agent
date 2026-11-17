@@ -7,10 +7,8 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from textwrap import wrap
 
 from elevenlabs import ElevenLabs
-from PIL import Image, ImageDraw, ImageFont
 
 if __package__:
     from .huggingface_media import HuggingFaceMediaGenerator
@@ -44,56 +42,6 @@ def _narration_cards(text: str) -> list[str]:
         " ".join(words[index : index + WORDS_PER_CARD])
         for index in range(0, len(words), WORDS_PER_CARD)
     ]
-
-
-def _wrap_text(
-    draw: ImageDraw.ImageDraw,
-    text: str,
-    font: ImageFont.FreeTypeFont,
-    max_width: int,
-) -> list[str]:
-    lines: list[str] = []
-    current_line = ""
-    for word in text.split():
-        candidate = f"{current_line} {word}".strip()
-        if current_line and draw.textlength(candidate, font=font) > max_width:
-            lines.append(current_line)
-            current_line = word
-        else:
-            current_line = candidate
-    if current_line:
-        lines.append(current_line)
-    return lines
-
-
-def _create_title_card(text: str, output_path: Path, background_path: Path) -> None:
-    image = Image.open(background_path).convert("RGBA")
-    image = image.resize((VIDEO_WIDTH, VIDEO_HEIGHT))
-    image = Image.alpha_composite(
-        image,
-        Image.new("RGBA", (VIDEO_WIDTH, VIDEO_HEIGHT), (8, 13, 22, 105)),
-    )
-    draw = ImageDraw.Draw(image)
-    accent_font = ImageFont.truetype("DejaVuSans.ttf", 22)
-    body_font = ImageFont.truetype("DejaVuSans.ttf", 48)
-    draw.rounded_rectangle((76, 80, 1204, 640), radius=28, fill=(25, 38, 58, 205))
-    draw.rounded_rectangle((120, 132, 176, 140), radius=4, fill="#f2a65a")
-    draw.text((120, 158), "YOUR STORY", font=accent_font, fill="#f2a65a")
-
-    lines = _wrap_text(draw, text, body_font, max_width=1000)
-    line_height = 66
-    block_height = len(lines) * line_height
-    y = (VIDEO_HEIGHT - block_height) // 2 + 28
-    for line in lines:
-        line_width = draw.textlength(line, font=body_font)
-        draw.text(
-            ((VIDEO_WIDTH - line_width) / 2, y),
-            line,
-            font=body_font,
-            fill="#f5f7fa",
-        )
-        y += line_height
-    image.save(output_path, format="PNG")
 
 
 def _generate_narration(
@@ -361,47 +309,46 @@ def create_video(
     dialogue_path.write_text(narration + "\n", encoding="utf-8")
     audio_path = run_dir / "narration.mp3"
 
-    print("Generating illustrated scenes...", flush=True)
+    print("Generating animated scenes...", flush=True)
     if progress_callback is not None:
         progress_callback("images", "Preparing illustrated shots...")
-    with tempfile.TemporaryDirectory(prefix="video-cards-") as temp_dir:
-        cards = _narration_cards(narration)
-        video_paths = []
-        for index, card in enumerate(cards, start=1):
-            _check_cancelled(cancel_requested)
-            if progress_callback is not None:
-                progress_callback("images", f"Generating image {index} of {len(cards)}...")
-            image_path = images_dir / f"shot_{index:03}.png"
-            video_path = images_dir / f"shot_{index:03}.mp4"
-            image_prompt = image_prompt_generator.generate_image_prompt(card)
-            media_generator.generate_image(
-                image_prompt,
-                image_path,
-                VIDEO_WIDTH,
-                VIDEO_HEIGHT,
-            )
-            _check_cancelled(cancel_requested)
-            if progress_callback is not None:
-                progress_callback("video", f"Animating shot {index} of {len(cards)}...")
-            media_generator.generate_video(image_path, image_prompt, video_path)
-            video_paths.append(video_path)
-
-        print("Creating narration with ElevenLabs...", flush=True)
-        if progress_callback is not None:
-            progress_callback("speech", "Generating speech with ElevenLabs...")
-        _generate_narration(narration, client, audio_path, cancel_requested)
-
-        print("Combining title cards and narration into an MP4...", flush=True)
+    cards = _narration_cards(narration)
+    video_paths = []
+    for index, card in enumerate(cards, start=1):
         _check_cancelled(cancel_requested)
         if progress_callback is not None:
-            progress_callback("video", "Combining animated scenes and speech...")
-        _assemble_video(
-            video_paths,
-            audio_path,
-            output_path,
-            cancel_requested,
-            cards,
+            progress_callback("images", f"Generating image {index} of {len(cards)}...")
+        image_path = images_dir / f"shot_{index:03}.png"
+        video_path = images_dir / f"shot_{index:03}.mp4"
+        image_prompt = image_prompt_generator.generate_image_prompt(card)
+        media_generator.generate_image(
+            image_prompt,
+            image_path,
+            VIDEO_WIDTH,
+            VIDEO_HEIGHT,
         )
+        _check_cancelled(cancel_requested)
+        if progress_callback is not None:
+            progress_callback("video", f"Animating shot {index} of {len(cards)}...")
+        media_generator.generate_video(image_path, image_prompt, video_path)
+        video_paths.append(video_path)
+
+    print("Creating narration with ElevenLabs...", flush=True)
+    if progress_callback is not None:
+        progress_callback("speech", "Generating speech with ElevenLabs...")
+    _generate_narration(narration, client, audio_path, cancel_requested)
+
+    print("Combining animated scenes and narration into an MP4...", flush=True)
+    _check_cancelled(cancel_requested)
+    if progress_callback is not None:
+        progress_callback("video", "Combining animated scenes and speech...")
+    _assemble_video(
+        video_paths,
+        audio_path,
+        output_path,
+        cancel_requested,
+        cards,
+    )
 
     _check_cancelled(cancel_requested)
     return output_path
