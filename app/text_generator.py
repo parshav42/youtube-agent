@@ -19,6 +19,26 @@ def _dialogue_prompt(video_idea: str) -> str:
     )
 
 
+def _provider_error_detail(response: requests.Response, token: str) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(error, dict):
+        detail = error.get("message")
+    elif isinstance(error, str):
+        detail = error
+    else:
+        detail = payload.get("message") if isinstance(payload, dict) else None
+    if not isinstance(detail, str):
+        return ""
+
+    detail = " ".join(detail.split()).replace(token, "[redacted]")
+    return detail[:500]
+
+
 class HuggingFaceTextGenerator:
     def __init__(self) -> None:
         self.token = os.getenv("HF_TOKEN", "").strip()
@@ -66,6 +86,10 @@ class HuggingFaceTextGenerator:
                 message = f"Hugging Face Inference Providers failed with HTTP {status_code}."
             elif status_code is not None:
                 message = f"Hugging Face Inference Providers rejected the request with HTTP {status_code}."
+                if error.response is not None:
+                    detail = _provider_error_detail(error.response, self.token)
+                    if detail:
+                        message = f"{message}: {detail}"
             else:
                 message = "Hugging Face Inference Providers rejected the request."
             raise RuntimeError(message) from None

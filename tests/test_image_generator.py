@@ -207,6 +207,7 @@ def test_hugging_face_text_generator_does_not_expose_token_in_request_errors(
         (401, "HF_TOKEN is invalid"),
         (403, "HF_TOKEN is invalid"),
         (404, "HF_MODEL 'test-model' is unavailable"),
+        (400, "Invalid request payload"),
         (429, "rate limit exceeded"),
         (503, "failed with HTTP 503"),
     ],
@@ -219,6 +220,9 @@ def test_hugging_face_text_generator_reports_provider_http_errors(
     class FakeResponse:
         def __init__(self, response_status: int) -> None:
             self.status_code = response_status
+
+        def json(self) -> dict[str, object]:
+            return {"error": {"message": "Invalid request payload."}}
 
         def raise_for_status(self) -> None:
             error = requests.HTTPError(response=self)
