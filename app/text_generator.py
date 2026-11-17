@@ -74,10 +74,11 @@ class HuggingFaceTextGenerator:
             )
             if not response.ok:
                 detail = _provider_error_detail(response, self.token)
+                response_text = response.text.replace(self.token, "[redacted]")[:1000]
 
                 print(f"HF HTTP STATUS: {response.status_code}")
                 print(f"HF MODEL: {self.model}")
-                print(f"HF ERROR DETAIL: {detail or response.text[:1000]}")
+                print(f"HF ERROR DETAIL: {detail or response_text}")
 
                 response.raise_for_status()
         except requests.HTTPError as error:
