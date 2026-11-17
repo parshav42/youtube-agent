@@ -52,15 +52,17 @@ selected provider and model availability. Keep `HF_TOKEN` private; it is used
 only by the backend and must not be added to frontend configuration.
 The backend defaults to `LLM_PROVIDER=huggingface`; if `HF_TOKEN` is missing,
 generation fails explicitly instead of falling back to a local service.
-Deployed environments always select Hugging Face, and reject
-`LLM_PROVIDER=mock`. Add `HF_TOKEN` to the API host's service variables; a
-local `.env` file is not automatically available to Railway.
+Deployed environments force Hugging Face for normal provider selections and
+reject `LLM_PROVIDER=mock` rather than silently using it. Add `HF_TOKEN` to
+the API host's service variables; a local `.env` file is not automatically
+available to Railway.
 
 ### Zero-cost local text generation
 
 For local development, Ollama can generate dialogue without a hosted text
-inference request. Install Ollama, start its local service, and download the
-default model:
+inference request. [Install Ollama](https://ollama.com/download) and ensure its
+service is running (on Linux, run `ollama serve` in a terminal), then download
+the default model:
 
 ```bash
 ollama pull qwen3:1.7b

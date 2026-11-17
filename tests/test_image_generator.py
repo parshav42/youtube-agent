@@ -22,6 +22,8 @@ def test_hugging_face_text_generator_parses_chat_completion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeResponse:
+        ok = True
+
         def raise_for_status(self) -> None:
             pass
 

@@ -73,6 +73,8 @@ def test_video_job_uses_hugging_face_when_configured_even_if_ollama_is_selected(
     requests_seen: list[tuple[str, dict[str, str], dict[str, object], int]] = []
 
     class FakeResponse:
+        ok = True
+
         def raise_for_status(self) -> None:
             pass
 
@@ -94,6 +96,7 @@ def test_video_job_uses_hugging_face_when_configured_even_if_ollama_is_selected(
 
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
     monkeypatch.setenv("HF_TOKEN", "test-token")
     monkeypatch.setenv("HF_MODEL", "Qwen/Qwen3-4B-Instruct-2507")
