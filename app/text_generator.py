@@ -1,5 +1,6 @@
 import os
 from typing import Protocol
+from urllib import response
 
 import requests
 
@@ -71,7 +72,14 @@ class HuggingFaceTextGenerator:
                 },
                 timeout=180,
             )
-            response.raise_for_status()
+            if not response.ok:
+                detail = _provider_error_detail(response, self.token)
+
+                print(f"HF HTTP STATUS: {response.status_code}")
+                print(f"HF MODEL: {self.model}")
+                print(f"HF ERROR DETAIL: {detail or response.text[:1000]}")
+
+                response.raise_for_status()
         except requests.HTTPError as error:
             status_code = (
                 error.response.status_code if error.response is not None else None
