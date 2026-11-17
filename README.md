@@ -1,14 +1,9 @@
 # ElevenLabs Narrated Video Maker
 
-Turn a written story into a narrated MP4. ElevenLabs Text to Speech reads the
-story aloud, and the app creates deterministic, locally illustrated scene
-images from each narration segment. It overlays the text and assembles the
-images with the narration using FFmpeg. The current image generator is a local
-Pillow-based implementation; it does not use an image-generation API.
-The story is expanded into a coherent narration/dialogue by Hugging Face
-Inference Providers before being sent to ElevenLabs. The generated script is
-split into segments; a local prompt builder creates a visual description for
-each illustration.
+Turn a written story into a narrated MP4. Hugging Face Inference Providers
+generate the story script, scene images, and image-to-video clips. ElevenLabs
+generates the narration audio, and FFmpeg assembles the animated scenes,
+captions, and narration into a 720p MP4.
 
 ## Requirements
 
@@ -43,13 +38,18 @@ Configure Hugging Face Inference Providers in `.env`:
 
 ```dotenv
 HF_TOKEN=your-server-only-token
-HF_MODEL=Qwen/Qwen3-4B-Instruct-2507
+HF_MODEL=Qwen/Qwen3-14B
 HF_BASE_URL=https://router.huggingface.co/v1
+HF_IMAGE_MODEL=Tongyi-MAI/Z-Image-Turbo
+HF_VIDEO_MODEL=Lightricks/LTX-2
+HF_MEDIA_TIMEOUT=600
 ```
 
-`HF_MODEL` and `HF_BASE_URL` default to the values above. Keep `HF_TOKEN`
-private; it is used only by the backend and must not be added to frontend
-configuration.
+`HF_MODEL`, `HF_BASE_URL`, `HF_IMAGE_MODEL`, `HF_VIDEO_MODEL`, and
+`HF_MEDIA_TIMEOUT` default to the values above. The token must have permission
+to call Hugging Face Inference Providers. Inference is billed according to the
+selected provider and model availability. Keep `HF_TOKEN` private; it is used
+only by the backend and must not be added to frontend configuration.
 The backend defaults to `LLM_PROVIDER=huggingface`; if `HF_TOKEN` is missing,
 generation fails explicitly instead of falling back to a local service. A
 configured `HF_TOKEN` selects Hugging Face even if `LLM_PROVIDER=ollama` is
@@ -107,12 +107,12 @@ output/YYYY-MM-DD/video-name-time/
 ├── video-name.mp4
 └── images/
     ├── shot_001.png
+    ├── shot_001.mp4
     └── ...
 ```
 
-The generated images are kept there and used to build the 720p MP4. The video
-includes the ElevenLabs narration audio. Images are local Pillow illustrations,
-not images from an external AI image service.
+Each generated image and its animated clip are kept in the run folder. The
+final video includes the ElevenLabs narration audio and captions.
 
 ## Frontend website
 
@@ -180,8 +180,10 @@ variables below. Keep the Hugging Face token in Railway's server-side variables:
 
 ```dotenv
 HF_TOKEN=your-server-only-token
-HF_MODEL=Qwen/Qwen3-4B-Instruct-2507
+HF_MODEL=Qwen/Qwen3-14B
 HF_BASE_URL=https://router.huggingface.co/v1
+HF_IMAGE_MODEL=Tongyi-MAI/Z-Image-Turbo
+HF_VIDEO_MODEL=Lightricks/LTX-2
 LLM_PROVIDER=huggingface
 ELEVENLABS_API_KEY=your-server-only-key
 SUPABASE_URL=https://your-project.supabase.co
@@ -193,8 +195,10 @@ Vercel same-origin proxy, set `CORS_ALLOWED_ORIGINS` on the API service.
 
 ```dotenv
 HF_TOKEN=your-server-only-token
-HF_MODEL=Qwen/Qwen3-4B-Instruct-2507
+HF_MODEL=Qwen/Qwen3-14B
 HF_BASE_URL=https://router.huggingface.co/v1
+HF_IMAGE_MODEL=Tongyi-MAI/Z-Image-Turbo
+HF_VIDEO_MODEL=Lightricks/LTX-2
 LLM_PROVIDER=huggingface
 ELEVENLABS_API_KEY=your-server-only-key
 CORS_ALLOWED_ORIGINS=https://your-project.vercel.app,https://www.your-domain.com

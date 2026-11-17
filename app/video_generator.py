@@ -13,11 +13,11 @@ from elevenlabs import ElevenLabs
 from PIL import Image, ImageDraw, ImageFont
 
 if __package__:
-    from .image_generator import create_image
+    from .huggingface_media import HuggingFaceMediaGenerator
     from .image_prompt_generator import ImagePromptGenerator, LocalImagePromptGenerator
     from .text_generator import TextGenerator, create_text_generator
 else:
-    from image_generator import create_image
+    from huggingface_media import HuggingFaceMediaGenerator
     from image_prompt_generator import ImagePromptGenerator, LocalImagePromptGenerator
     from text_generator import TextGenerator, create_text_generator
 
@@ -157,71 +157,111 @@ def _audio_duration(audio_path: Path) -> float:
 
 
 def _assemble_video(
-    card_paths: list[Path],
+    video_paths: list[Path],
     audio_path: Path,
     output_path: Path,
     cancel_requested: Callable[[], bool] | None = None,
+    captions: list[str] | None = None,
 ) -> None:
     _check_cancelled(cancel_requested)
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("FFmpeg is required. Install FFmpeg and try again.")
-    if not card_paths:
-        raise ValueError("At least one title card is needed to create the video.")
+    if not video_paths:
+        raise ValueError("At least one generated video clip is needed.")
+    if captions is not None and len(captions) != len(video_paths):
+        raise ValueError("The number of captions must match the generated video clips.")
 
     duration = _audio_duration(audio_path)
     _check_cancelled(cancel_requested)
-    card_duration = duration / len(card_paths)
-    concat_path = card_paths[0].parent / "cards.txt"
-    with concat_path.open("w", encoding="utf-8") as concat_file:
-        for card_path in card_paths:
-            concat_file.write(f"file '{card_path.name}'\n")
-            concat_file.write(f"duration {card_duration:.6f}\n")
-        concat_file.write(f"file '{card_paths[-1].name}'\n")
+    with tempfile.TemporaryDirectory(
+        prefix="video-assembly-", dir=output_path.parent
+    ) as assembly_dir:
+        work_dir = Path(assembly_dir)
+        concat_path = work_dir / "clips.txt"
+        with concat_path.open("w", encoding="utf-8") as concat_file:
+            for video_path in video_paths:
+                escaped_path = video_path.resolve().as_posix().replace("'", "'\\''")
+                concat_file.write(f"file '{escaped_path}'\n")
 
-    command = [
-        ffmpeg,
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        str(concat_path),
-        "-i",
-        str(audio_path),
-        "-vf",
-        f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT},fps={VIDEO_FPS},format=yuv420p",
-        "-map",
-        "0:v:0",
-        "-map",
-        "1:a:0",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "23",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        "-t",
-        f"{duration:.6f}",
-        "-movflags",
-        "+faststart",
-        str(output_path),
-    ]
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        cwd=concat_path.parent,
-    )
+        command = [
+            ffmpeg,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-stream_loop",
+            "-1",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_path),
+            "-i",
+            str(audio_path),
+        ]
+        video_filters = []
+        if captions is not None:
+            subtitle_path = work_dir / "captions.srt"
+            subtitle_path.write_text(
+                _subtitle_file(captions, duration),
+                encoding="utf-8",
+            )
+            video_filters.append(
+                f"subtitles={subtitle_path.name}:"
+                "force_style='FontName=DejaVu Sans,FontSize=24,"
+                "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
+                "BorderStyle=3,Outline=2,Shadow=0,Alignment=2,MarginV=36'"
+            )
+        video_filters.extend(
+            [
+                f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=decrease",
+                f"pad={VIDEO_WIDTH}:{VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2",
+                f"fps={VIDEO_FPS}",
+                "format=yuv420p",
+            ]
+        )
+        command.extend(
+            [
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                "-vf",
+                ",".join(video_filters),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "23",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-t",
+                f"{duration:.6f}",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ]
+        )
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=work_dir,
+        )
+        _finish_ffmpeg(process, output_path, cancel_requested)
+
+
+def _finish_ffmpeg(
+    process: subprocess.Popen[str],
+    output_path: Path,
+    cancel_requested: Callable[[], bool] | None,
+) -> None:
     deadline = time.monotonic() + 180
     try:
         while True:
@@ -254,12 +294,33 @@ def _assemble_video(
         raise RuntimeError("FFmpeg finished without creating a video file.")
 
 
+def _subtitle_file(captions: list[str], duration: float) -> str:
+    def timestamp(seconds: float) -> str:
+        milliseconds = round(seconds * 1000)
+        hours, milliseconds = divmod(milliseconds, 3_600_000)
+        minutes, milliseconds = divmod(milliseconds, 60_000)
+        whole_seconds, milliseconds = divmod(milliseconds, 1000)
+        return f"{hours:02}:{minutes:02}:{whole_seconds:02},{milliseconds:03}"
+
+    caption_duration = duration / len(captions)
+    entries = []
+    for index, caption in enumerate(captions):
+        start = index * caption_duration
+        end = (index + 1) * caption_duration
+        safe_caption = caption.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        entries.append(
+            f"{index + 1}\n{timestamp(start)} --> {timestamp(end)}\n{safe_caption}\n"
+        )
+    return "\n".join(entries)
+
+
 def create_video(
     prompt: str,
     client: ElevenLabs,
     output_dir: Path,
     image_prompt_generator: ImagePromptGenerator | None = None,
     text_generator: TextGenerator | None = None,
+    media_generator: HuggingFaceMediaGenerator | None = None,
     progress_callback: Callable[[str, str], None] | None = None,
     cancel_requested: Callable[[], bool] | None = None,
 ) -> Path:
@@ -270,6 +331,8 @@ def create_video(
         image_prompt_generator = LocalImagePromptGenerator()
     if text_generator is None:
         text_generator = create_text_generator()
+    if media_generator is None:
+        media_generator = HuggingFaceMediaGenerator()
 
     _check_cancelled(cancel_requested)
     if progress_callback is not None:
@@ -298,24 +361,30 @@ def create_video(
     dialogue_path.write_text(narration + "\n", encoding="utf-8")
     audio_path = run_dir / "narration.mp3"
 
-    print("Creating title cards...", flush=True)
+    print("Generating illustrated scenes...", flush=True)
     if progress_callback is not None:
         progress_callback("images", "Preparing illustrated shots...")
     with tempfile.TemporaryDirectory(prefix="video-cards-") as temp_dir:
-        work_dir = Path(temp_dir)
         cards = _narration_cards(narration)
-        card_paths = []
+        video_paths = []
         for index, card in enumerate(cards, start=1):
             _check_cancelled(cancel_requested)
             if progress_callback is not None:
-                progress_callback("images", f"Creating shot {index} of {len(cards)}...")
+                progress_callback("images", f"Generating image {index} of {len(cards)}...")
             image_path = images_dir / f"shot_{index:03}.png"
-            card_path = work_dir / f"card_{index:03}.png"
+            video_path = images_dir / f"shot_{index:03}.mp4"
             image_prompt = image_prompt_generator.generate_image_prompt(card)
-            create_image(image_prompt, image_path)
+            media_generator.generate_image(
+                image_prompt,
+                image_path,
+                VIDEO_WIDTH,
+                VIDEO_HEIGHT,
+            )
             _check_cancelled(cancel_requested)
-            _create_title_card(card, card_path, image_path)
-            card_paths.append(card_path)
+            if progress_callback is not None:
+                progress_callback("video", f"Animating shot {index} of {len(cards)}...")
+            media_generator.generate_video(image_path, image_prompt, video_path)
+            video_paths.append(video_path)
 
         print("Creating narration with ElevenLabs...", flush=True)
         if progress_callback is not None:
@@ -325,8 +394,14 @@ def create_video(
         print("Combining title cards and narration into an MP4...", flush=True)
         _check_cancelled(cancel_requested)
         if progress_callback is not None:
-            progress_callback("video", "Combining images and speech into the video...")
-        _assemble_video(card_paths, audio_path, output_path, cancel_requested)
+            progress_callback("video", "Combining animated scenes and speech...")
+        _assemble_video(
+            video_paths,
+            audio_path,
+            output_path,
+            cancel_requested,
+            cards,
+        )
 
     _check_cancelled(cancel_requested)
     return output_path

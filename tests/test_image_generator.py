@@ -8,6 +8,7 @@ from PIL import Image
 
 from app import video_generator
 from app.image_generator import create_image
+from app.huggingface_media import HuggingFaceMediaGenerator
 from app.image_prompt_generator import LocalImagePromptGenerator
 from app.text_generator import (
     HuggingFaceTextGenerator,
@@ -70,7 +71,7 @@ def test_hugging_face_text_generator_uses_requested_defaults(
 
     generator = HuggingFaceTextGenerator()
 
-    assert generator.model == "Qwen/Qwen3-4B-Instruct-2507"
+    assert generator.model == "Qwen/Qwen3-14B"
     assert generator.base_url == "https://router.huggingface.co/v1"
 
 
@@ -105,6 +106,72 @@ def test_local_prompt_generator_formats_story_segment() -> None:
 
     assert "A fox finds a hidden door." in image_prompt
     assert "16:9" in image_prompt
+
+
+def test_huggingface_media_generator_creates_images_and_video(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_options: list[dict[str, object]] = []
+    image_requests: list[dict[str, object]] = []
+    video_requests: list[dict[str, object]] = []
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            client_options.append(kwargs)
+
+        def text_to_image(self, **kwargs: object) -> Image.Image:
+            image_requests.append(kwargs)
+            return Image.new("RGB", (320, 180), color="blue")
+
+        def image_to_video(self, **kwargs: object) -> bytes:
+            video_requests.append(kwargs)
+            return b"generated video"
+
+    monkeypatch.setattr("app.huggingface_media.InferenceClient", FakeClient)
+    monkeypatch.setenv("HF_TOKEN", "test-token")
+    monkeypatch.setenv("HF_IMAGE_MODEL", "test-image-model")
+    monkeypatch.setenv("HF_VIDEO_MODEL", "test-video-model")
+    monkeypatch.setenv("HF_MEDIA_TIMEOUT", "15")
+
+    generator = HuggingFaceMediaGenerator()
+    image_path = generator.generate_image(
+        "A fox in a forest",
+        tmp_path / "shot.png",
+        320,
+        180,
+    )
+    video_path = generator.generate_video(
+        image_path,
+        "Animate the fox walking",
+        tmp_path / "shot.mp4",
+    )
+
+    assert client_options == [
+        {"token": "test-token", "provider": "auto", "timeout": 15.0}
+    ]
+    assert image_requests == [
+        {
+            "prompt": "A fox in a forest",
+            "model": "test-image-model",
+            "width": 320,
+            "height": 180,
+        }
+    ]
+    assert video_requests[0]["model"] == "test-video-model"
+    assert video_requests[0]["image"] == image_path
+    with Image.open(image_path) as image:
+        assert image.size == (320, 180)
+    assert video_path.read_bytes() == b"generated video"
+
+
+def test_huggingface_media_generator_requires_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+
+    with pytest.raises(RuntimeError, match="Missing HF_TOKEN"):
+        HuggingFaceMediaGenerator()
 
 
 def test_hugging_face_text_generator_requires_token(
@@ -258,6 +325,30 @@ def test_create_video_stores_images_and_sends_generated_dialogue_to_speech(
             assert video_idea == story
             return dialogue
 
+    class FakeMediaGenerator:
+        def generate_image(
+            self,
+            _prompt: str,
+            output_path: Path,
+            _width: int,
+            _height: int,
+        ) -> Path:
+            return _write_fake_image(
+                "LLM-generated forest illustration",
+                output_path,
+                image_prompts,
+                image_paths,
+            )
+
+        def generate_video(
+            self,
+            _image_path: Path,
+            _prompt: str,
+            output_path: Path,
+        ) -> Path:
+            output_path.write_bytes(b"animated video")
+            return output_path
+
     monkeypatch.setattr(video_generator.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(video_generator, "_create_title_card", lambda *_args: None)
     monkeypatch.setattr(
@@ -269,16 +360,6 @@ def test_create_video_stores_images_and_sends_generated_dialogue_to_speech(
         ),
     )
     monkeypatch.setattr(video_generator, "_assemble_video", lambda *_args: None)
-    monkeypatch.setattr(
-        video_generator,
-        "create_image",
-        lambda image_prompt, output_path: _write_fake_image(
-            image_prompt,
-            output_path,
-            image_prompts,
-            image_paths,
-        ),
-    )
 
     video_path = video_generator.create_video(
         prompt=story,
@@ -286,18 +367,27 @@ def test_create_video_stores_images_and_sends_generated_dialogue_to_speech(
         output_dir=tmp_path,
         image_prompt_generator=FakeImagePromptGenerator(),
         text_generator=FakeTextGenerator(),
+        media_generator=FakeMediaGenerator(),
         progress_callback=lambda stage, _message: progress_events.append(stage),
     )
 
     assert generated_prompts == [dialogue]
     assert image_prompts == ["LLM-generated forest illustration"]
     assert speech_text == [dialogue]
-    assert progress_events == ["dialogue", "images", "images", "speech", "video"]
+    assert progress_events == [
+        "dialogue",
+        "images",
+        "images",
+        "video",
+        "speech",
+        "video",
+    ]
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", video_path.parent.parent.name)
     assert video_path.parent.parent.parent == tmp_path
     assert image_paths[0].parent == video_path.parent / "images"
     assert image_paths[0].name == "shot_001.png"
     assert image_paths[0].read_bytes() == b"image"
+    assert (video_path.parent / "images" / "shot_001.mp4").read_bytes() == b"animated video"
     assert (video_path.parent / "dialogue.txt").read_text(encoding="utf-8").strip() == dialogue
     assert (video_path.parent / "narration.mp3").read_bytes() == b"audio"
 
@@ -347,7 +437,8 @@ def _write_fake_image(
     output_path: Path,
     image_prompts: list[str],
     image_paths: list[Path],
-) -> None:
+) -> Path:
     image_prompts.append(image_prompt)
     image_paths.append(output_path)
     output_path.write_bytes(b"image")
+    return output_path

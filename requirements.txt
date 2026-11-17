@@ -2,4 +2,5 @@ python-dotenv>=1,<2
 requests>=2.31,<3
 elevenlabs>=2,<3
 Pillow>=10,<12
+huggingface_hub>=1.0,<2
 pytest>=8,<9

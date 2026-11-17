@@ -31,7 +31,7 @@ class HuggingFaceTextGenerator:
         if not self.base_url:
             raise ValueError("HF_BASE_URL cannot be empty.")
 
-        self.model = os.getenv("HF_MODEL", "Qwen/Qwen3-4B-Instruct-2507").strip()
+        self.model = os.getenv("HF_MODEL", "Qwen/Qwen3-14B").strip()
         if not self.model:
             raise ValueError("HF_MODEL cannot be empty.")
 

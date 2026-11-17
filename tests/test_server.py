@@ -109,10 +109,31 @@ def test_video_job_uses_hugging_face_when_configured_even_if_ollama_is_selected(
     )
     monkeypatch.setattr(video_generator.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(video_generator, "_create_title_card", lambda *_args: None)
+
+    class FakeMediaGenerator:
+        def generate_image(
+            self,
+            _prompt: str,
+            path: Path,
+            _width: int,
+            _height: int,
+        ) -> Path:
+            path.write_bytes(b"image")
+            return path
+
+        def generate_video(
+            self,
+            _image_path: Path,
+            _prompt: str,
+            path: Path,
+        ) -> Path:
+            path.write_bytes(b"animated video")
+            return path
+
     monkeypatch.setattr(
         video_generator,
-        "create_image",
-        lambda _prompt, path: path.write_bytes(b"image"),
+        "HuggingFaceMediaGenerator",
+        FakeMediaGenerator,
     )
     monkeypatch.setattr(
         video_generator,
