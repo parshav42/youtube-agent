@@ -52,12 +52,37 @@ selected provider and model availability. Keep `HF_TOKEN` private; it is used
 only by the backend and must not be added to frontend configuration.
 The backend defaults to `LLM_PROVIDER=huggingface`; if `HF_TOKEN` is missing,
 generation fails explicitly instead of falling back to a local service.
-Railway and production environments always select Hugging Face, even if
-`LLM_PROVIDER=ollama` is set. Add `HF_TOKEN` to the API host's service
-variables; a local `.env` file is not automatically available to Railway.
-For local development only, set `LLM_PROVIDER=ollama` without an `HF_TOKEN`
-to opt in to Ollama and optionally configure `OLLAMA_BASE_URL` and
-`OLLAMA_MODEL`.
+Deployed environments always select Hugging Face, and reject
+`LLM_PROVIDER=mock`. Add `HF_TOKEN` to the API host's service variables; a
+local `.env` file is not automatically available to Railway.
+
+### Zero-cost local text generation
+
+For local development, Ollama can generate dialogue without a hosted text
+inference request. Install Ollama, start its local service, and download the
+default model:
+
+```bash
+ollama pull qwen3:1.7b
+```
+
+Set these variables in the local `.env`:
+
+```dotenv
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen3:1.7b
+```
+
+The explicit Ollama setting is honored locally even if `HF_TOKEN` is present.
+For tests or UI development that only needs deterministic placeholder dialogue,
+set `LLM_PROVIDER=mock`; this provider makes no LLM API request and cannot be
+selected in a deployed environment.
+
+These settings replace only the **text/dialogue** provider. Full video
+generation still uses the configured Hugging Face image/video models and
+ElevenLabs text-to-speech integration, which may have their own usage costs.
+The local Ollama and mock providers do not add any paid services.
 
 To persist video ideas, job progress, results, and generated files in Supabase:
 

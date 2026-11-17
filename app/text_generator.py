@@ -94,6 +94,12 @@ class HuggingFaceTextGenerator:
             )
             if status_code in {401, 403}:
                 message = "HF_TOKEN is invalid or lacks permission for Hugging Face Inference Providers."
+            elif status_code == 402:
+                message = (
+                    "Hugging Face Inference Providers returned HTTP 402 "
+                    "(payment required). Use LLM_PROVIDER=ollama or "
+                    "LLM_PROVIDER=mock for local text generation."
+                )
             elif status_code == 404:
                 message = f"HF_MODEL '{self.model}' is unavailable from Hugging Face Inference Providers."
             elif status_code == 429:
@@ -138,7 +144,9 @@ class OllamaTextGenerator:
     def __init__(self) -> None:
         self.base_url = os.getenv(
             "OLLAMA_BASE_URL", "http://localhost:11434"
-        ).rstrip("/")
+        ).strip().rstrip("/")
+        if not self.base_url:
+            raise ValueError("OLLAMA_BASE_URL cannot be empty.")
         self.model = os.getenv("OLLAMA_MODEL", "qwen3:1.7b").strip()
         if not self.model:
             raise ValueError("OLLAMA_MODEL cannot be empty.")
@@ -159,14 +167,44 @@ class OllamaTextGenerator:
                 timeout=180,
             )
             response.raise_for_status()
+        except requests.ConnectionError:
+            raise RuntimeError(
+                f"Could not connect to Ollama at {self.base_url}. "
+                "Make sure Ollama is running and the model is installed."
+            ) from None
+        except requests.Timeout:
+            raise RuntimeError("Ollama inference request timed out.") from None
+        except requests.HTTPError as error:
+            status_code = (
+                error.response.status_code if error.response is not None else None
+            )
+            if status_code == 404:
+                raise RuntimeError(
+                    f"Ollama model '{self.model}' was not found. "
+                    f"Run `ollama pull {self.model}` and try again."
+                ) from None
+            raise RuntimeError(
+                f"Ollama inference request failed with HTTP {status_code}."
+            ) from None
         except requests.RequestException:
             raise RuntimeError("Ollama inference request failed.") from None
 
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError:
+            raise RuntimeError("Ollama returned an invalid JSON response.") from None
         dialogue = payload.get("response") if isinstance(payload, dict) else None
         if not isinstance(dialogue, str) or not dialogue.strip():
             raise RuntimeError("Ollama returned empty dialogue.")
         return dialogue.strip()
+
+
+class MockTextGenerator:
+    def generate_dialogue(self, video_idea: str) -> str:
+        idea = video_idea.strip()
+        if not idea:
+            raise ValueError("Video idea cannot be empty.")
+        return f"Mock narration for: {idea}"
 
 
 def create_text_generator() -> TextGenerator:
@@ -176,10 +214,14 @@ def create_text_generator() -> TextGenerator:
         or bool(os.getenv("SPACE_ID", "").strip())
         or os.getenv("APP_ENV", "").strip().lower() in {"prod", "production"}
     )
-    if os.getenv("HF_TOKEN", "").strip() or deployed:
+    if deployed and provider == "mock":
+        raise RuntimeError("LLM_PROVIDER=mock is not allowed in deployed environments.")
+    if deployed:
         provider = "huggingface"
     if provider == "huggingface":
         return HuggingFaceTextGenerator()
     if provider == "ollama":
         return OllamaTextGenerator()
-    raise ValueError("LLM_PROVIDER must be 'huggingface' or 'ollama'.")
+    if provider == "mock":
+        return MockTextGenerator()
+    raise ValueError("LLM_PROVIDER must be 'huggingface', 'ollama', or 'mock'.")

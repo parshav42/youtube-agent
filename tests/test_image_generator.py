@@ -12,6 +12,7 @@ from app.huggingface_media import HuggingFaceMediaGenerator
 from app.image_prompt_generator import LocalImagePromptGenerator
 from app.text_generator import (
     HuggingFaceTextGenerator,
+    MockTextGenerator,
     OllamaTextGenerator,
     create_text_generator,
 )
@@ -206,6 +207,7 @@ def test_hugging_face_text_generator_does_not_expose_token_in_request_errors(
     [
         (401, "HF_TOKEN is invalid"),
         (403, "HF_TOKEN is invalid"),
+        (402, "payment required"),
         (404, "HF_MODEL 'test-model' is unavailable"),
         (400, "Invalid request payload"),
         (429, "rate limit exceeded"),
@@ -296,6 +298,10 @@ def test_text_generator_uses_ollama_only_when_explicitly_selected(
         return FakeResponse()
 
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("SPACE_ID", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setenv("HF_TOKEN", "test-token")
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama.local:11434")
     monkeypatch.setenv("OLLAMA_MODEL", "local-model")
     monkeypatch.setattr("app.text_generator.requests.post", fake_post)
@@ -309,6 +315,53 @@ def test_text_generator_uses_ollama_only_when_explicitly_selected(
     )
     assert requests_seen[0][0] == "http://ollama.local:11434/api/generate"
     assert requests_seen[0][1]["model"] == "local-model"
+
+
+def test_text_generator_uses_mock_without_making_api_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("SPACE_ID", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setattr(
+        "app.text_generator.requests.post",
+        lambda *_args, **_kwargs: pytest.fail("Mock provider must not make requests"),
+    )
+
+    generator = create_text_generator()
+
+    assert isinstance(generator, MockTextGenerator)
+    assert generator.generate_dialogue("A fox finds a hidden door.") == (
+        "Mock narration for: A fox finds a hidden door."
+    )
+
+
+def test_mock_provider_is_rejected_in_deployed_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+
+    with pytest.raises(RuntimeError, match="mock is not allowed"):
+        create_text_generator()
+
+
+def test_ollama_connection_error_explains_how_to_start_local_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HF_TOKEN", "test-token")
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("SPACE_ID", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setattr(
+        "app.text_generator.requests.post",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(requests.ConnectionError()),
+    )
+
+    with pytest.raises(RuntimeError, match="Could not connect to Ollama"):
+        create_text_generator().generate_dialogue("A fox finds a hidden door.")
 
 
 def test_text_generator_does_not_use_ollama_in_production(
