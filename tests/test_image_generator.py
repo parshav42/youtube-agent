@@ -214,10 +214,15 @@ def test_hugging_face_text_generator_does_not_expose_token_in_request_errors(
 )
 def test_hugging_face_text_generator_reports_provider_http_errors(
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     status_code: int,
     message: str,
 ) -> None:
     class FakeResponse:
+        ok = False
+        headers = {"Content-Type": "application/json"}
+        text = '{"error":{"message":"Invalid request payload."}}'
+
         def __init__(self, response_status: int) -> None:
             self.status_code = response_status
 
@@ -237,6 +242,13 @@ def test_hugging_face_text_generator_reports_provider_http_errors(
 
     with pytest.raises(RuntimeError, match=message):
         HuggingFaceTextGenerator().generate_dialogue("A fox finds a hidden door.")
+
+    diagnostics = capsys.readouterr().out
+    assert f"HF HTTP STATUS: {status_code}" in diagnostics
+    assert "HF MODEL: test-model" in diagnostics
+    assert "HF CONTENT TYPE: application/json" in diagnostics
+    assert "HF ERROR DETAIL: Invalid request payload." in diagnostics
+    assert "test-token" not in diagnostics
 
 
 def test_text_generator_defaults_to_hugging_face_without_ollama_fallback(
