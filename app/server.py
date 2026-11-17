@@ -170,11 +170,16 @@ def _run_video_job(job_id: str, idea: str) -> None:
 
     try:
         check_cancelled()
-        api_key = os.getenv("ELEVENLABS_API_KEY")
-        if not api_key:
-            raise RuntimeError("Missing ELEVENLABS_API_KEY in the project .env file.")
-
-        client = ElevenLabs(api_key=api_key, timeout=60)
+        tts_provider = os.getenv("TTS_PROVIDER", "elevenlabs").strip().lower()
+        if tts_provider == "local":
+            client = None
+        elif tts_provider == "elevenlabs":
+            api_key = os.getenv("ELEVENLABS_API_KEY")
+            if not api_key:
+                raise RuntimeError("Missing ELEVENLABS_API_KEY in the project .env file.")
+            client = ElevenLabs(api_key=api_key, timeout=60)
+        else:
+            raise ValueError("TTS_PROVIDER must be 'elevenlabs' or 'local'.")
 
         def report_progress(stage: str, message: str) -> None:
             check_cancelled()

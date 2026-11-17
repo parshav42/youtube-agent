@@ -23,13 +23,19 @@ def main() -> None:
     project_root = Path(__file__).resolve().parents[1]
     load_dotenv(project_root / ".env")
 
-    api_key = os.getenv("ELEVENLABS_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "Missing ELEVENLABS_API_KEY in the project .env file. "
-            "Run `npx -y @elevenlabs/cli@latest onboard check --env-path .env`."
-        )
-    client = ElevenLabs(api_key=api_key, timeout=60)
+    tts_provider = os.getenv("TTS_PROVIDER", "elevenlabs").strip().lower()
+    if tts_provider == "local":
+        client = None
+    elif tts_provider == "elevenlabs":
+        api_key = os.getenv("ELEVENLABS_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "Missing ELEVENLABS_API_KEY in the project .env file. "
+                "Run `npx -y @elevenlabs/cli@latest onboard check --env-path .env`."
+            )
+        client = ElevenLabs(api_key=api_key, timeout=60)
+    else:
+        raise ValueError("TTS_PROVIDER must be 'elevenlabs' or 'local'.")
 
     story = input("Paste the story or narration for the video: ").strip()
     if not story:

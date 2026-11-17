@@ -13,10 +13,12 @@ from elevenlabs import ElevenLabs
 if __package__:
     from .huggingface_media import HuggingFaceMediaGenerator
     from .image_prompt_generator import ImagePromptGenerator, LocalImagePromptGenerator
+    from .local_media_generator import LocalMediaGenerator
     from .text_generator import TextGenerator, create_text_generator
 else:
     from huggingface_media import HuggingFaceMediaGenerator
     from image_prompt_generator import ImagePromptGenerator, LocalImagePromptGenerator
+    from local_media_generator import LocalMediaGenerator
     from text_generator import TextGenerator, create_text_generator
 
 VIDEO_WIDTH = 1280
@@ -46,11 +48,20 @@ def _narration_cards(text: str) -> list[str]:
 
 def _generate_narration(
     text: str,
-    client: ElevenLabs,
+    client: ElevenLabs | None,
     output_path: Path,
     cancel_requested: Callable[[], bool] | None = None,
 ) -> None:
     _check_cancelled(cancel_requested)
+    tts_provider = os.getenv("TTS_PROVIDER", "elevenlabs").strip().lower()
+    if tts_provider == "local":
+        _generate_local_narration(text, output_path, cancel_requested)
+        return
+    if tts_provider != "elevenlabs":
+        raise ValueError("TTS_PROVIDER must be 'elevenlabs' or 'local'.")
+    if client is None:
+        raise RuntimeError("ElevenLabs client is required for hosted narration.")
+
     voice_id = os.getenv("ELEVENLABS_VOICE_ID")
     if not voice_id:
         voices = client.voices.get_all().voices
@@ -73,6 +84,70 @@ def _generate_narration(
             audio_file.write(chunk)
     if output_path.stat().st_size == 0:
         raise RuntimeError("ElevenLabs returned an empty narration audio file.")
+
+
+def _generate_local_narration(
+    text: str,
+    output_path: Path,
+    cancel_requested: Callable[[], bool] | None = None,
+) -> None:
+    tts = shutil.which("espeak-ng") or shutil.which("espeak")
+    if not tts:
+        raise RuntimeError(
+            "Local narration requires espeak-ng or espeak. Install one and try again."
+        )
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("FFmpeg is required. Install FFmpeg and try again.")
+
+    try:
+        speech = subprocess.run(
+            [tts, "--stdout", text],
+            check=True,
+            capture_output=True,
+            timeout=120,
+        )
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError("Local text-to-speech generation failed.") from error
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("Local text-to-speech generation timed out.") from error
+    _check_cancelled(cancel_requested)
+    if not speech.stdout:
+        raise RuntimeError("Local text-to-speech returned empty audio.")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(
+            [
+                ffmpeg,
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                "pipe:0",
+                "-codec:a",
+                "libmp3lame",
+                "-b:a",
+                "128k",
+                str(output_path),
+            ],
+            input=speech.stdout,
+            check=True,
+            capture_output=True,
+            timeout=120,
+        )
+    except subprocess.CalledProcessError as error:
+        detail = error.stderr.decode(errors="replace").strip()[-1000:] if error.stderr else ""
+        message = "FFmpeg could not encode local narration."
+        if detail:
+            message = f"{message} {detail}"
+        raise RuntimeError(message) from error
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("FFmpeg timed out encoding local narration.") from error
+    _check_cancelled(cancel_requested)
+    if not output_path.is_file() or output_path.stat().st_size == 0:
+        raise RuntimeError("Local narration did not create an audio file.")
 
 
 def _audio_duration(audio_path: Path) -> float:
@@ -264,7 +339,7 @@ def _subtitle_file(captions: list[str], duration: float) -> str:
 
 def create_video(
     prompt: str,
-    client: ElevenLabs,
+    client: ElevenLabs | None,
     output_dir: Path,
     image_prompt_generator: ImagePromptGenerator | None = None,
     text_generator: TextGenerator | None = None,
@@ -280,7 +355,13 @@ def create_video(
     if text_generator is None:
         text_generator = create_text_generator()
     if media_generator is None:
-        media_generator = HuggingFaceMediaGenerator()
+        media_provider = os.getenv("MEDIA_PROVIDER", "huggingface").strip().lower()
+        if media_provider == "local":
+            media_generator = LocalMediaGenerator()
+        elif media_provider == "huggingface":
+            media_generator = HuggingFaceMediaGenerator()
+        else:
+            raise ValueError("MEDIA_PROVIDER must be 'huggingface' or 'local'.")
 
     _check_cancelled(cancel_requested)
     if progress_callback is not None:
@@ -333,9 +414,13 @@ def create_video(
         media_generator.generate_video(image_path, image_prompt, video_path)
         video_paths.append(video_path)
 
-    print("Creating narration with ElevenLabs...", flush=True)
+    tts_provider = os.getenv("TTS_PROVIDER", "elevenlabs").strip().lower()
+    if tts_provider not in {"elevenlabs", "local"}:
+        raise ValueError("TTS_PROVIDER must be 'elevenlabs' or 'local'.")
+    tts_label = "local text-to-speech" if tts_provider == "local" else "ElevenLabs"
+    print(f"Creating narration with {tts_label}...", flush=True)
     if progress_callback is not None:
-        progress_callback("speech", "Generating speech with ElevenLabs...")
+        progress_callback("speech", f"Generating speech with {tts_label}...")
     _generate_narration(narration, client, audio_path, cancel_requested)
 
     print("Combining animated scenes and narration into an MP4...", flush=True)

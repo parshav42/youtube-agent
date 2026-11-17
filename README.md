@@ -9,8 +9,8 @@ captions, and narration into a 720p MP4.
 
 - Python 3.10+
 - Node.js 18+ and npm
-- A Hugging Face token with Inference Providers access
-- [ElevenLabs API key](https://elevenlabs.io/) with Text to Speech access
+- Hugging Face token and [ElevenLabs API key](https://elevenlabs.io/) for hosted
+  image/video generation and narration (not needed in full-local mode)
 - FFmpeg and `ffprobe`
 
 ## Setup
@@ -57,34 +57,45 @@ reject `LLM_PROVIDER=mock` rather than silently using it. Add `HF_TOKEN` to
 the API host's service variables; a local `.env` file is not automatically
 available to Railway.
 
-### Zero-cost local text generation
+### Zero-cost full-local development
 
-For local development, Ollama can generate dialogue without a hosted text
-inference request. [Install Ollama](https://ollama.com/download) and ensure its
-service is running (on Linux, run `ollama serve` in a terminal), then download
-the default model:
+The app can run its text, images, motion clips, and narration locally without
+calling Hugging Face Inference Providers or ElevenLabs. Install FFmpeg,
+`espeak-ng` (or `espeak`), and optionally [Ollama](https://ollama.com/download).
+On Ubuntu/Debian:
+
+```bash
+sudo apt install ffmpeg espeak-ng
+```
+
+For local LLM dialogue instead of placeholder narration, start Ollama (on Linux,
+run `ollama serve` in a terminal) and download the default model:
 
 ```bash
 ollama pull qwen3:1.7b
 ```
 
-Set these variables in the local `.env`:
+Set these variables in the local `.env`. Use `LLM_PROVIDER=mock` for a
+zero-model-download test run, or choose `ollama` for locally generated dialogue:
 
 ```dotenv
-LLM_PROVIDER=ollama
+LLM_PROVIDER=mock
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen3:1.7b
+MEDIA_PROVIDER=local
+TTS_PROVIDER=local
 ```
 
-The explicit Ollama setting is honored locally even if `HF_TOKEN` is present.
-For tests or UI development that only needs deterministic placeholder dialogue,
-set `LLM_PROVIDER=mock`; this provider makes no LLM API request and cannot be
-selected in a deployed environment.
+Change `LLM_PROVIDER=mock` to `LLM_PROVIDER=ollama` to use Ollama. With the
+local media and speech settings, HF and ElevenLabs credentials are not required.
+`MEDIA_PROVIDER=local` makes prompt-themed illustrations with the project's
+Pillow renderer and creates subtle zoom-motion clips with FFmpeg.
+`TTS_PROVIDER=local` uses `espeak-ng`/`espeak` and FFmpeg to create narration.
+The `mock` text provider is for development/testing and cannot be selected in a
+deployed environment.
 
-These settings replace only the **text/dialogue** provider. Full video
-generation still uses the configured Hugging Face image/video models and
-ElevenLabs text-to-speech integration, which may have their own usage costs.
-The local Ollama and mock providers do not add any paid services.
+These local output generators avoid paid inference APIs but are simpler than
+the hosted image/video generation and ElevenLabs voices.
 
 To persist video ideas, job progress, results, and generated files in Supabase:
 

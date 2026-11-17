@@ -1,4 +1,5 @@
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from app import video_generator
 from app.image_generator import create_image
 from app.huggingface_media import HuggingFaceMediaGenerator
 from app.image_prompt_generator import LocalImagePromptGenerator
+from app.local_media_generator import LocalMediaGenerator
 from app.text_generator import (
     HuggingFaceTextGenerator,
     MockTextGenerator,
@@ -175,6 +177,118 @@ def test_huggingface_media_generator_requires_token(
 
     with pytest.raises(RuntimeError, match="Missing HF_TOKEN"):
         HuggingFaceMediaGenerator()
+
+
+def test_local_media_generator_creates_prompt_image_and_motion_clip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **_kwargs: object) -> None:
+        commands.append(command)
+        Path(command[-1]).write_bytes(b"local clip")
+
+    monkeypatch.setattr("app.local_media_generator.shutil.which", lambda _name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr("app.local_media_generator.subprocess.run", fake_run)
+
+    generator = LocalMediaGenerator()
+    image_path = generator.generate_image(
+        "A forest at sunrise",
+        tmp_path / "shot.png",
+        320,
+        180,
+    )
+    video_path = generator.generate_video(
+        image_path,
+        "A forest at sunrise",
+        tmp_path / "shot.mp4",
+    )
+
+    assert image_path.is_file()
+    assert video_path.read_bytes() == b"local clip"
+    assert "zoompan" in commands[0][commands[0].index("-vf") + 1]
+
+
+def test_local_narration_uses_espeak_and_ffmpeg_without_api(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run(
+        command: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[bytes] | None:
+        commands.append(command)
+        if command[0].endswith(("espeak-ng", "espeak")):
+            return subprocess.CompletedProcess(command, 0, stdout=b"wav audio")
+        Path(command[-1]).write_bytes(b"mp3 audio")
+        assert kwargs["input"] == b"wav audio"
+        return None
+
+    monkeypatch.setenv("TTS_PROVIDER", "local")
+    monkeypatch.setattr(
+        "app.video_generator.shutil.which",
+        lambda name: "/usr/bin/espeak-ng" if name == "espeak-ng" else "/usr/bin/ffmpeg",
+    )
+    monkeypatch.setattr("app.video_generator.subprocess.run", fake_run)
+    output_path = tmp_path / "narration.mp3"
+
+    video_generator._generate_narration(
+        "A locally generated narration.",
+        None,
+        output_path,
+    )
+
+    assert output_path.read_bytes() == b"mp3 audio"
+    assert commands[0][:2] == ["/usr/bin/espeak-ng", "--stdout"]
+    assert commands[1][0] == "/usr/bin/ffmpeg"
+
+
+def test_full_local_video_generation_avoids_hosted_providers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    monkeypatch.setenv("MEDIA_PROVIDER", "local")
+    monkeypatch.setenv("TTS_PROVIDER", "local")
+    monkeypatch.setattr(
+        "app.video_generator.shutil.which",
+        lambda name: "/usr/bin/espeak-ng" if name == "espeak-ng" else f"/usr/bin/{name}",
+    )
+    monkeypatch.setattr(
+        "app.video_generator.HuggingFaceMediaGenerator",
+        lambda: pytest.fail("Local media mode must not use Hugging Face"),
+    )
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes] | None:
+        if command[0].endswith(("espeak-ng", "espeak")):
+            return subprocess.CompletedProcess(command, 0, stdout=b"wav audio")
+        Path(command[-1]).write_bytes(b"local output")
+        return None
+
+    monkeypatch.setattr("app.video_generator.subprocess.run", fake_run)
+    monkeypatch.setattr(video_generator, "_audio_duration", lambda _path: 2.0)
+
+    def fake_assemble(
+        _clips: list[Path],
+        _audio: Path,
+        output_path: Path,
+        *_args: object,
+    ) -> None:
+        output_path.write_bytes(b"local final video")
+
+    monkeypatch.setattr(video_generator, "_assemble_video", fake_assemble)
+
+    output_path = video_generator.create_video(
+        "A fox finds a hidden door.",
+        client=None,
+        output_dir=tmp_path,
+    )
+
+    assert output_path.read_bytes() == b"local final video"
+    assert output_path.with_name("narration.mp3").read_bytes() == b"local output"
 
 
 def test_hugging_face_text_generator_requires_token(
