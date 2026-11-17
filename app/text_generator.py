@@ -85,11 +85,18 @@ class HuggingFaceTextGenerator:
             elif status_code is not None and status_code >= 500:
                 message = f"Hugging Face Inference Providers failed with HTTP {status_code}."
             elif status_code is not None:
-                message = f"Hugging Face Inference Providers rejected the request with HTTP {status_code}."
+                message = (
+                    "Hugging Face Inference Providers rejected the request "
+                    f"with HTTP {status_code}"
+                )
                 if error.response is not None:
                     detail = _provider_error_detail(error.response, self.token)
                     if detail:
                         message = f"{message}: {detail}"
+                    else:
+                        message = f"{message}."
+                else:
+                    message = f"{message}."
             else:
                 message = "Hugging Face Inference Providers rejected the request."
             raise RuntimeError(message) from None
