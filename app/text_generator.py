@@ -124,7 +124,12 @@ class OllamaTextGenerator:
 
 def create_text_generator() -> TextGenerator:
     provider = os.getenv("LLM_PROVIDER", "huggingface").strip().lower()
-    if os.getenv("HF_TOKEN", "").strip():
+    deployed = (
+        bool(os.getenv("RAILWAY_ENVIRONMENT", "").strip())
+        or bool(os.getenv("SPACE_ID", "").strip())
+        or os.getenv("APP_ENV", "").strip().lower() in {"prod", "production"}
+    )
+    if os.getenv("HF_TOKEN", "").strip() or deployed:
         provider = "huggingface"
     if provider == "huggingface":
         return HuggingFaceTextGenerator()

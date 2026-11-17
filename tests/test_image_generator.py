@@ -295,6 +295,28 @@ def test_text_generator_uses_ollama_only_when_explicitly_selected(
     assert requests_seen[0][1]["model"] == "local-model"
 
 
+def test_text_generator_does_not_use_ollama_in_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+
+    with pytest.raises(RuntimeError, match="Missing HF_TOKEN"):
+        create_text_generator()
+
+
+def test_text_generator_does_not_use_ollama_in_hugging_face_space(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("SPACE_ID", "test-user/test-space")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+
+    with pytest.raises(RuntimeError, match="Missing HF_TOKEN"):
+        create_text_generator()
+
+
 def test_hugging_face_text_generator_rejects_empty_video_idea(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -51,12 +51,13 @@ to call Hugging Face Inference Providers. Inference is billed according to the
 selected provider and model availability. Keep `HF_TOKEN` private; it is used
 only by the backend and must not be added to frontend configuration.
 The backend defaults to `LLM_PROVIDER=huggingface`; if `HF_TOKEN` is missing,
-generation fails explicitly instead of falling back to a local service. A
-configured `HF_TOKEN` selects Hugging Face even if `LLM_PROVIDER=ollama` is
-also set. For local development only, set `LLM_PROVIDER=ollama` without an
-`HF_TOKEN` to opt in to Ollama and optionally configure `OLLAMA_BASE_URL` and
-`OLLAMA_MODEL`. Railway should keep `LLM_PROVIDER=huggingface` or leave it
-unset.
+generation fails explicitly instead of falling back to a local service.
+Railway and production environments always select Hugging Face, even if
+`LLM_PROVIDER=ollama` is set. Add `HF_TOKEN` to the API host's service
+variables; a local `.env` file is not automatically available to Railway.
+For local development only, set `LLM_PROVIDER=ollama` without an `HF_TOKEN`
+to opt in to Ollama and optionally configure `OLLAMA_BASE_URL` and
+`OLLAMA_MODEL`.
 
 To persist video ideas, job progress, results, and generated files in Supabase:
 

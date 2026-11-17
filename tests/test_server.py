@@ -11,7 +11,6 @@ import pytest
 
 from app import server, video_generator
 
-
 @contextmanager
 def _running_server() -> Iterator[str]:
     http_server = ThreadingHTTPServer(("127.0.0.1", 0), server.VideoRequestHandler)
